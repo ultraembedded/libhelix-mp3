@@ -62,10 +62,10 @@
 
 static __inline int MULSHIFT32(int x, int y)	
 {
-    __asm {
+	__asm {
 		mov		eax, x
-	    imul	y
-	    mov		eax, edx
+		imul	y
+		mov		eax, edx
 	}
 }
 
@@ -221,22 +221,22 @@ static __inline int CLZ(int x)
 
 static __inline int MULSHIFT32(int x, int y)
 {
-    /* important rules for smull RdLo, RdHi, Rm, Rs:
-     *     RdHi and Rm can't be the same register
-     *     RdLo and Rm can't be the same register
-     *     RdHi and RdLo can't be the same register
-     * Note: Rs determines early termination (leading sign bits) so if you want to specify
-     *   which operand is Rs, put it in the SECOND argument (y)
+	/* important rules for smull RdLo, RdHi, Rm, Rs:
+	 *     RdHi and Rm can't be the same register
+	 *     RdLo and Rm can't be the same register
+	 *     RdHi and RdLo can't be the same register
+	 * Note: Rs determines early termination (leading sign bits) so if you want to specify
+	 *   which operand is Rs, put it in the SECOND argument (y)
 	 * For inline assembly, x and y are not assumed to be R0, R1 so it shouldn't matter
 	 *   which one is returned. (If this were a function call, returning y (R1) would 
 	 *   require an extra "mov r0, r1")
-     */
-    int zlow;
-    __asm {
-    	smull zlow,y,x,y
-   	}
+	 */
+	int zlow;
+	__asm {
+		smull zlow,y,x,y
+	}
 
-    return y;
+	return y;
 }
 
 static __inline int FASTABS(int x) 
@@ -302,20 +302,20 @@ static __inline Word64 MADD64(Word64 sum64, int x, int y)
 
 static __inline int MULSHIFT32(int x, int y)
 {
-    /* important rules for smull RdLo, RdHi, Rm, Rs:
-     *     RdHi and Rm can't be the same register
-     *     RdLo and Rm can't be the same register
-     *     RdHi and RdLo can't be the same register
-     * Note: Rs determines early termination (leading sign bits) so if you want to specify
-     *   which operand is Rs, put it in the SECOND argument (y)
+	/* important rules for smull RdLo, RdHi, Rm, Rs:
+	 *     RdHi and Rm can't be the same register
+	 *     RdLo and Rm can't be the same register
+	 *     RdHi and RdLo can't be the same register
+	 * Note: Rs determines early termination (leading sign bits) so if you want to specify
+	 *   which operand is Rs, put it in the SECOND argument (y)
 	 * For inline assembly, x and y are not assumed to be R0, R1 so it shouldn't matter
 	 *   which one is returned. (If this were a function call, returning y (R1) would 
 	 *   require an extra "mov r0, r1")
-     */
-    int zlow;
-    __asm__ volatile ("smull %0,%1,%2,%3" : "=&r" (zlow), "=r" (y) : "r" (x), "1" (y)) ;
+	 */
+	int zlow;
+	__asm__ volatile ("smull %0,%1,%2,%3" : "=&r" (zlow), "=r" (y) : "r" (x), "1" (y)) ;
 
-    return y;
+	return y;
 }
 
 #endif
@@ -352,7 +352,73 @@ static __inline int CLZ(int x)
 
 #else
 
+#ifdef __riscv
+
+typedef long long Word64;
+
+static __inline int MULSHIFT32(int x, int y)
+{
+	unsigned int result = 0;
+	asm volatile ("mulh %0, %1, %2" : "=r"(result): "r"(x), "r"(y));
+	return result;
+}
+
+static __inline int FASTABS(int x) 
+{
+	int sign;
+
+	sign = x >> (sizeof(int) * 8 - 1);
+	x ^= sign;
+	x -= sign;
+
+	return x;
+}
+
+static __inline int CLZ(int x)
+{
+	int numZeros;
+
+	if (!x)
+		return (sizeof(int) * 8);
+
+	numZeros = 0;
+	while (!(x & 0x80000000)) {
+		numZeros++;
+		x <<= 1;
+	} 
+
+	return numZeros;
+}
+
+static __inline Word64 MADD64(Word64 sum, int a, int b)
+{
+	unsigned int result_hi = 0;
+	unsigned int result_lo = 0;
+	asm volatile ("mulh %0, %1, %2" : "=r"(result_hi): "r"(a), "r"(b));
+	asm volatile ("mul  %0, %1, %2" : "=r"(result_lo): "r"(a), "r"(b));
+
+	Word64 result = result_hi;
+	result <<= 32;
+	result += result_lo;
+	result += sum;
+	return result;
+}
+
+static __inline Word64 SHL64(Word64 x, int n)
+{
+	return (x<<n);
+}
+
+static __inline Word64 SAR64(Word64 x, int n)
+{
+	return (x >> n);
+}
+
+#else
+
 #error Unsupported platform in assembly.h
+
+#endif
 
 #endif	/* platforms */
 

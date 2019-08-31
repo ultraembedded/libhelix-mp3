@@ -33,6 +33,7 @@ multiply (providing a 64-bit result). The following processors and toolchains ar
  - ARM, ARM Developer Suite (ADS)
  - ARM, Microsoft Embedded Visual C++
  - ARM, GNU toolchain (gcc)
+ - RISC-V, GNU toolchain (gcc)
 
 ARM refers to any processor supporting ARM architecture v.4 or above. Thumb is not required.
 Typically this means an ARM7TDMI or better (including ARM9, StrongARM, XScale, etc.)
