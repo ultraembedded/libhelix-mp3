@@ -414,6 +414,67 @@ static __inline Word64 SAR64(Word64 x, int n)
 	return (x >> n);
 }
 
+#elif defined(__xtensa__)
+
+#include "xtensa/config/core-isa.h"
+
+typedef long long Word64;
+
+static __inline Word64 MADD64(Word64 sum64, int x, int y)
+{
+    return (sum64 + ((long long)x * y));
+}
+
+#if XCHAL_HAVE_MUL32_HIGH
+
+static __inline int MULSHIFT32(int x, int y)
+{
+    /* important rules for smull RdLo, RdHi, Rm, Rs:
+     *     RdHi and Rm can't be the same register
+     *     RdLo and Rm can't be the same register
+     *     RdHi and RdLo can't be the same register
+     * Note: Rs determines early termination (leading sign bits) so if you want to specify
+     *   which operand is Rs, put it in the SECOND argument (y)
+     * For inline assembly, x and y are not assumed to be R0, R1 so it shouldn't matter
+     *   which one is returned. (If this were a function call, returning y (R1) would
+     *   require an extra "mov r0, r1")
+     */
+    int ret;
+    asm volatile ("mulsh %0, %1, %2" : "=r" (ret) : "r" (x), "r" (y));
+    return ret;
+}
+
+#else
+
+#error Missing definition of MULSHIFT32
+
+#endif
+
+#if XCHAL_HAVE_ABS
+
+static __inline int FASTABS(int x)
+{
+    int ret;
+    asm volatile ("abs %0, %1" : "=r" (ret) : "r" (x));
+    return ret;
+}
+
+#else
+
+#error Missing definition of FASTABS
+
+#endif
+
+static __inline Word64 SAR64(Word64 x, int n)
+{
+    return x >> n;
+}
+
+static __inline int CLZ(int x)
+{
+    return __builtin_clz(x);
+}
+
 #else
 
 #error Unsupported platform in assembly.h
