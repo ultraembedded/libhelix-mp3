@@ -416,7 +416,78 @@ static __inline Word64 SAR64(Word64 x, int n)
 
 #else
 
-#error Unsupported platform in assembly.h
+#warning "Using default platform in assembly.h. Consider optimizing."
+
+typedef long long Word64;
+
+/**
+ * Multiply together two 32-bit numbers and return the top 32-bits of the result.
+ */
+static __inline int MULSHIFT32(int x, int y)
+{
+    Word64 result = ((Word64) x) * y;
+
+    return (int)(result >> 32);
+}
+
+/**
+ * Absolute value of x
+ */
+static __inline int FASTABS(int x)
+{
+    int sign;
+
+    sign = x >> (sizeof(int) * 8 - 1);
+    x ^= sign;
+    x -= sign;
+
+    return x;
+}
+
+/**
+ * Leading zeros
+ */
+static __inline int CLZ(int x)
+{
+    int numZeros;
+
+    if (!x)
+        return (sizeof(int) * 8);
+
+    numZeros = 0;
+    while (!(x & 0x80000000)) {
+        numZeros++;
+        x <<= 1;
+    }
+
+    return numZeros;
+}
+
+/**
+ * Increase sum by x * y
+ */
+static __inline Word64 MADD64(Word64 sum64, int x, int y)
+{
+    sum64 += (Word64)x * (Word64)y;
+
+    return sum64;
+}
+
+/**
+ * Shift left
+ */
+static __inline Word64 SHL64(Word64 x, int n)
+{
+    return ((Word64) x) << n;
+}
+
+/**
+ * Shift right
+ */
+static __inline Word64 SAR64(Word64 x, int n)
+{
+    return x >> n;
+}
 
 #endif
 
