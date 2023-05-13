@@ -5,9 +5,11 @@ project(helixmp3)
 FILE(GLOB HelixMP3_real_src
         real/*.c)
 
-include_directories(pub)
 
 add_library(${PROJECT_NAME}
         ${HelixMP3_real_src}
         mp3dec.c
         mp3tabs.c)
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+        pub)
