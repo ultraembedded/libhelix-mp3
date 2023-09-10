@@ -425,9 +425,14 @@ typedef long long Word64;
  */
 static __inline int MULSHIFT32(int x, int y)
 {
-    Word64 result = ((Word64) x) * y;
+    // Word64 result = ((Word64) x) * y;
+    // return (int)(result >> 32);
 
-    return (int)(result >> 32);
+    const int W1 = x >> 16;
+    const int R1 = x & 0xFFFF;
+    const int W2 = y >> 16;
+    const int R2 = y & 0xFFFF;
+    return W1*W2 + (W1*R2>>16) + (W2*R1>>16);
 }
 
 /**
