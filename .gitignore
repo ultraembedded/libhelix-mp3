@@ -27,3 +27,6 @@ gadtools_radio_layout_test
 /skin_performance_test
 /skin_sprite_test
 /interface_prefs_test
+
+# Packaged release drawers (make release)
+release/
