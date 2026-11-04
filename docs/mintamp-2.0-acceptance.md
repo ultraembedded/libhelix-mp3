@@ -79,7 +79,7 @@ no claim of testing the entire Internet's classic skin collection.
 | Main controls | Minimise iconifies to an AppIcon; double size is on D and the Windows menu. The options button opens Settings rather than a popup menu (Intuition menus are right-button). No pause blink/easter-egg/clutterbar parity. |
 | Timing/seeking | Buffer-boundary pause and output clock, 99:59 cap, local MP3 bitrate/VBR approximation; other formats/live radio do not acquire new seek support. |
 | Artwork | Shared screen pen mapping can quantise colours on ECS/AGA/RTG. No REGION.TXT shaped/translucent windows, cursor skins, extended NUMS_EX glyphs, WAL skins or Windows DLL plugins. |
-| Native integration | Settings and the radio browser remain the established native utility windows; artwork has a skin-framed window but its options stay in the classic Playback menu. Star ratings are classic-window only. |
+| Native integration | Settings use a skinned settings window (classic window only as a fallback); the radio browser remains the established native utility window. Artwork options are settings rows. Star ratings, artwork refresh/reload, bench mode and the progress bar are classic-window only. |
 
 ## Setup and record sheet
 
@@ -131,6 +131,11 @@ For **each** target:
    and confirm the CLI `--skin` and saved EQ/balance apply.
    Iconify from the minimise button and the menu; restore by double-click.
    Check stream URL entry, file info, artwork updates and arrow keys.
+   **Skinned settings:** T opens the settings window and never the classic
+   window; change every row in both directions, stopped and while playing
+   (decoder rows refuse with a notice), then switch to Classic and confirm
+   the classic gadgets/menus show the same values, and that they persist
+   after a relaunch. Use *Classic mode: Switch now* from the window itself.
 7. **Skin/UI:** mint-leaf, 2.91 and at least two independently sourced classic
    skins; compare screenshots at normal and double size. Press/release outside
    controls, focus/unfocus each window, shade/unshade near screen bottom,

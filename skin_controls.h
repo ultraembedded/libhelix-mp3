@@ -75,6 +75,19 @@ void skin_visual_analyse(const signed char *pcm, unsigned char *levels);
 typedef struct SkinClock { unsigned long milliseconds,remainder; int rate; } SkinClock;
 void skin_clock_advance(SkinClock *clock,unsigned long frames,int rate);
 typedef struct SkinRect { int x,y,w,h; } SkinRect;
+/* Main, playlist, EQ, artwork and settings windows. */
+#define SKIN_WINDOW_MAX 5
 unsigned skin_window_group(const SkinRect *rects,int count,int root,int tolerance);
 void skin_window_snap(const SkinRect *rects,int count,int root,unsigned moving,int tolerance,int *dx,int *dy);
+/* Rows of the skinned settings window (see skin_player.h). */
+#define SKIN_SETTINGS_MAX 32
+enum { SKIN_ROW_HEADER, SKIN_ROW_VALUE, SKIN_ROW_ACTION };
+typedef struct SkinSettingsRow {
+    short kind, id, action;
+    char label[16], value[24];
+} SkinSettingsRow;
+/* Append a row (bounded and NUL-terminated; value may be NULL). */
+void skin_settings_row(SkinSettingsRow *rows,int *count,int kind,int id,const char *label,const char *value);
+/* Step a cyclic choice: +1/-1 with wrap-around in min..max. */
+int skin_settings_cycle(int value,int direction,int min,int max);
 #endif

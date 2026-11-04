@@ -52,7 +52,7 @@ static const SkinMenuDef kMenuDefs[]={
     {0,0,SKIN_STREAM,"Open stream URL..."},
     {0,0,SKIN_RADIO,"Internet Radio..."},
     {0,0,SKIN_INFO,"File info..."},
-    {0,0,SKIN_SETTINGS,"Settings..."},
+    {0,1,SKIN_SETTINGS,"Settings"},
     {0,0,SKIN_INTERFACE,"Interface preferences..."},
     {0,1,SKIN_CLASSIC,"Classic interface"},
     {0,0,SKIN_ICONIFY,"Iconify"},
@@ -80,16 +80,19 @@ typedef struct SkinMenuStrip {
     struct IntuiText labels[SKIN_MENU_MAX];
     unsigned long checks;
 } SkinMenuStrip;
-enum { STRIP_TEMPLATE, STRIP_MAIN, STRIP_PLAYLIST, STRIP_ART, STRIP_COUNT };
+enum { STRIP_TEMPLATE, STRIP_MAIN, STRIP_PLAYLIST, STRIP_ART, STRIP_SETTINGS, STRIP_COUNT };
 
 /* Artwork window: 64x64 frontend artwork inside a skin-coloured frame. */
 #define SKIN_ART_SIZE 64
 #define SKIN_ART_BOX 74
-enum { SKIN_ART_NONE, SKIN_ART_RADIO, SKIN_ART_LOADING, SKIN_ART_IMAGE };
+enum { SKIN_ART_NONE, SKIN_ART_RADIO, SKIN_ART_LOADING, SKIN_ART_IMAGE, SKIN_ART_OFF };
+/* Settings window: PLEDIT frame, 10-pixel Topaz rows, up to 19 visible. */
+#define SKIN_SET_VISIBLE 19
+enum { SET_PRESS_NONE, SET_PRESS_DRAG, SET_PRESS_CLOSE, SET_PRESS_ROW, SET_PRESS_SCROLL };
 
 struct SkinPlayer {
     struct Screen *screen;
-    struct Window *win, *plwin, *eqwin, *artwin, *target;
+    struct Window *win, *plwin, *eqwin, *artwin, *setwin, *target;
     struct BitMap *text_source, *text_scaled;
     struct TextFont *playlist_font;
     struct MsgPort *visual_port;
@@ -101,7 +104,12 @@ struct SkinPlayer {
     struct AppIcon *app_icon;
     struct DiskObject *app_object, app_icon_copy;
     int iconified, art_left, art_top, art_position, restore_art, art_drag_x, art_drag_y, art_dragging;
-    int art_kind, art_drawn_kind, art_have_drawn;
+    int art_kind, art_drawn_kind, art_have_drawn, art_disabled;
+    SkinSettingsRow set_rows[SKIN_SETTINGS_MAX], set_drawn[SKIN_SETTINGS_MAX];
+    int set_count, set_focus, set_top, set_visible, set_pressed, set_row, set_have_drawn;
+    int set_drawn_count, set_drawn_focus, set_drawn_top, set_drawn_active, set_drawn_pressed;
+    int set_left, set_top_edge, set_position, restore_settings, set_drag_x, set_drag_y;
+    ULONG art_seconds, art_micros;
     unsigned long art_hash;
     unsigned char art_rgb[SKIN_ART_SIZE*SKIN_ART_SIZE*3];
     SkinState now, drawn;
@@ -136,6 +144,8 @@ static void visual_arm(SkinPlayer *p);
 static void menu_sync(SkinPlayer *p);
 static void art_close(SkinPlayer *p);
 static int art_open(SkinPlayer *p);
+static void settings_close(SkinPlayer *p);
+static int settings_open(SkinPlayer *p);
 
 static int suffix(const char *path,const char *ext)
 {
@@ -281,11 +291,11 @@ static void fill(void *ctx,unsigned rgb,int x,int y,int w,int h)
     SetAPen(p->target->RPort,(ULONG)color_pen(p,p->resources,rgb));
     RectFill(p->target->RPort,x*s,y*s,(x+w)*s-1,(y+h)*s-1);
 }
-#define SKIN_WINDOWS 4
+#define SKIN_WINDOWS SKIN_WINDOW_MAX
 static void window_rects(SkinPlayer *p,SkinRect *r,struct Window **windows)
 {
     int i;
-    windows[0]=p->win; windows[1]=p->plwin; windows[2]=p->eqwin; windows[3]=p->artwin;
+    windows[0]=p->win; windows[1]=p->plwin; windows[2]=p->eqwin; windows[3]=p->artwin; windows[4]=p->setwin;
     memset(r,0,SKIN_WINDOWS*sizeof(*r));
     for (i=0;i<SKIN_WINDOWS;++i) if (windows[i]) {
         r[i].x=windows[i]->LeftEdge; r[i].y=windows[i]->TopEdge;
@@ -539,6 +549,7 @@ static unsigned long menu_checks(SkinPlayer *p)
         case SKIN_PLAYLIST: on=p->plwin!=NULL; break;
         case SKIN_EQ: on=p->eqwin!=NULL; break;
         case SKIN_ART: on=p->artwin!=NULL; break;
+        case SKIN_SETTINGS: on=p->setwin!=NULL; break;
         case SKIN_SIZE: on=p->resources && p->resources->scale==2; break;
         case SKIN_FILTER: on=p->now.filter; break;
         default: break; /* Classic interface is never ticked while skinned. */
@@ -556,7 +567,8 @@ static void strip_checks(SkinMenuStrip *strip,unsigned long bits)
     strip->checks=bits;
 }
 static struct Window *strip_window(SkinPlayer *p,int index)
-{ return index==STRIP_MAIN ? p->win : index==STRIP_PLAYLIST ? p->plwin : index==STRIP_ART ? p->artwin : NULL; }
+{ return index==STRIP_MAIN ? p->win : index==STRIP_PLAYLIST ? p->plwin : index==STRIP_ART ? p->artwin :
+         index==STRIP_SETTINGS ? p->setwin : NULL; }
 static void strip_attach(SkinPlayer *p,int index,struct Window *w)
 {
     strip_copy(&p->strips[index],&p->strips[STRIP_TEMPLATE]);
@@ -750,8 +762,10 @@ static void art_repaint(SkinPlayer *p,int all)
             }
         }
     } else if (text_ready(p)) {
-        art_label(p,p->art_kind==SKIN_ART_LOADING ? "LOADING" : p->art_kind==SKIN_ART_RADIO ? "RADIO" : "NO ART",28);
-        if (p->art_kind!=SKIN_ART_LOADING) art_label(p,p->art_kind==SKIN_ART_RADIO ? "NO LOGO" : "",40);
+        art_label(p,p->art_kind==SKIN_ART_LOADING ? "LOADING" : p->art_kind==SKIN_ART_RADIO ? "RADIO" :
+                    p->art_kind==SKIN_ART_OFF ? "ART OFF" : "NO ART",p->art_kind==SKIN_ART_OFF ? 22 : 28);
+        if (p->art_kind==SKIN_ART_OFF) { art_label(p,"T FOR",36); art_label(p,"SETTINGS",46); }
+        else if (p->art_kind!=SKIN_ART_LOADING) art_label(p,p->art_kind==SKIN_ART_RADIO ? "NO LOGO" : "",40);
     }
     p->art_drawn_kind=p->art_kind; p->art_have_drawn=1;
 }
@@ -794,7 +808,8 @@ void skin_player_artwork(SkinPlayer *p,const unsigned char *rgb,int valid,int lo
 {
     int kind; unsigned long hash=2166136261UL; size_t i;
     if (!p) return;
-    kind=valid && rgb ? SKIN_ART_IMAGE : loading ? SKIN_ART_LOADING : radio ? SKIN_ART_RADIO : SKIN_ART_NONE;
+    kind=p->art_disabled ? SKIN_ART_OFF : valid && rgb ? SKIN_ART_IMAGE : loading ? SKIN_ART_LOADING :
+        radio ? SKIN_ART_RADIO : SKIN_ART_NONE;
     /* Hash only while visible: a hidden artwork window costs nothing. */
     if (!p->artwin) { p->art_kind=-1; return; }
     if (kind==SKIN_ART_IMAGE) {
@@ -804,18 +819,29 @@ void skin_player_artwork(SkinPlayer *p,const unsigned char *rgb,int valid,int lo
     } else if (kind==p->art_kind) return;
     p->art_kind=kind; art_repaint(p,1);
 }
+int skin_player_artwork_visible(SkinPlayer *p) { return p && p->artwin; }
+void skin_player_artwork_enabled(SkinPlayer *p,int enabled)
+{
+    if (!p || p->art_disabled==!enabled) return;
+    p->art_disabled=!enabled; p->art_kind=-1; /* the next update redraws */
+}
 static int menu_action(SkinPlayer *p,UWORD code,SkinEvent *event);
 static int key_action(SkinPlayer *p,UWORD code,SkinEvent *event);
 static int art_poll(SkinPlayer *p,SkinEvent *event)
 {
     struct IntuiMessage *m;
     while (p->artwin && (m=(struct IntuiMessage *)GetMsg(p->artwin->UserPort))!=NULL) {
-        ULONG type=m->Class; UWORD code=m->Code,qualifier=m->Qualifier;
+        ULONG type=m->Class,seconds=m->Seconds,micros=m->Micros; UWORD code=m->Code,qualifier=m->Qualifier;
         int sx=p->screen->MouseX,sy=p->screen->MouseY;
         ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event));
         if (type==IDCMP_REFRESHWINDOW) { BeginRefresh(p->artwin); art_repaint(p,1); EndRefresh(p->artwin,TRUE); }
         else if (type==IDCMP_MENUPICK) { if (menu_action(p,code,event)) return 1; }
         else if (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN) {
+            /* Double-click the artwork for the file/stream information. */
+            if (DoubleClick(p->art_seconds,p->art_micros,seconds,micros)) {
+                p->art_seconds=p->art_micros=0; event->action=SKIN_INFO; event->released=1; return 1;
+            }
+            p->art_seconds=seconds; p->art_micros=micros;
             p->art_dragging=1; p->art_drag_x=sx; p->art_drag_y=sy; drag_begin(p,3,qualifier);
         } else if (type==IDCMP_MOUSEMOVE && p->art_dragging) {
             drag_move(p,sx-p->art_drag_x,sy-p->art_drag_y); p->art_drag_x=sx; p->art_drag_y=sy;
@@ -824,6 +850,248 @@ static int art_poll(SkinPlayer *p,SkinEvent *event)
         } else if (type==IDCMP_VANILLAKEY) {
             if (code==27 || code=='a' || code=='A') { art_close(p); save_state(p); }
             else if (key_action(p,code,event)) return 1;
+        }
+    }
+    return 0;
+}
+/* ---- Settings window ----------------------------------------------------
+ * A skinned page for the player's settings only: the classic MintAMP
+ * window is no longer shown just to change them. The frame reuses the
+ * PLEDIT title, side and scrollbar sprites; rows use the PLEDIT.TXT
+ * colours and ROM Topaz, like the playlist. Rows come from the frontend,
+ * followed by the player's own Interface rows. */
+enum { SET_ROW_SKIN=-1, SET_ROW_SIZE=-2, SET_ROW_PREFS=-3, SET_ROW_CLASSIC=-4 };
+static int settings_rows_height(SkinPlayer *p) { return p->set_visible*10; }
+static void settings_clamp(SkinPlayer *p)
+{
+    int maximum=p->set_count-p->set_visible;
+    if (maximum<0) maximum=0;
+    if (p->set_focus>=p->set_count) p->set_focus=p->set_count-1;
+    if (p->set_focus<0) p->set_focus=0;
+    if (p->set_focus<p->set_top) p->set_top=p->set_focus;
+    if (p->set_focus>=p->set_top+p->set_visible) p->set_top=p->set_focus-p->set_visible+1;
+    if (p->set_top>maximum) p->set_top=maximum;
+    if (p->set_top<0) p->set_top=0;
+}
+static void settings_sprite_column(SkinPlayer *p,int sx,int w,int x,int bottom)
+{
+    int y;
+    for (y=20;y<bottom;y+=29) blit(p,SKIN_PLEDIT,sx,42,w,bottom-y<29 ? bottom-y : 29,x,y);
+}
+static void settings_repaint(SkinPlayer *p,int all)
+{
+    const WinampSkin *k; int i,sy,active,bottom,maximum;
+    if (!p->setwin || !p->resources || !text_ready(p)) return;
+    k=&p->resources->skin; p->target=p->setwin;
+    active=(p->setwin->Flags&WFLG_WINDOWACTIVE)!=0; sy=active ? 0 : 21;
+    bottom=22+settings_rows_height(p);
+    if (!p->set_have_drawn) all=1;
+    if (all || active!=p->set_drawn_active || p->set_pressed!=p->set_drawn_pressed) {
+        for (i=25;i<250;i+=25) blit(p,SKIN_PLEDIT,127,sy,25,20,i,0);
+        blit(p,SKIN_PLEDIT,0,sy,25,20,0,0);
+        blit(p,SKIN_PLEDIT,153,sy,25,20,250,0);
+        if (p->set_pressed==SET_PRESS_CLOSE) blit(p,SKIN_PLEDIT,52,42,9,9,264,3);
+        playlist_label(p,"MINTAMP SETTINGS",k->playlist_normal,k->playlist_background,74,6,128);
+    }
+    if (all) {
+        settings_sprite_column(p,0,12,0,bottom);
+        settings_sprite_column(p,31,20,255,bottom);
+        for (i=0;i<275;i+=25) blit(p,SKIN_PLEDIT,127,21,i+25>275 ? 275-i : 25,20,i,bottom);
+        fill(p,k->playlist_background,12,20,243,bottom-20);
+        playlist_label(p,"SHIFT-CLICK: PREVIOUS",k->playlist_normal,k->playlist_background,54,bottom+6,168);
+    }
+    for (i=0;i<p->set_visible;++i) {
+        int index=p->set_top+i, old=p->set_drawn_top+i;
+        const SkinSettingsRow *r=index<p->set_count ? &p->set_rows[index] : NULL;
+        const SkinSettingsRow *o=old<p->set_drawn_count ? &p->set_drawn[old] : NULL;
+        int focus=r && index==p->set_focus && r->kind!=SKIN_ROW_HEADER;
+        int was=o && old==p->set_drawn_focus && o->kind!=SKIN_ROW_HEADER;
+        unsigned bg=focus ? k->playlist_selected : k->playlist_background;
+        if (!all && focus==was && ((!r && !o) || (r && o && r->kind==o->kind &&
+            !strcmp(r->label,o->label) && !strcmp(r->value,o->value)))) continue;
+        fill(p,bg,12,22+i*10,243,10);
+        if (!r) continue;
+        if (r->kind==SKIN_ROW_HEADER) {
+            char line[40]; int n;
+            n=snprintf(line,sizeof(line),"- %s -",r->label); if (n>29) n=29;
+            playlist_label(p,line,k->playlist_current,bg,14+(232-n*8)/2,23+i*10,n*8);
+        } else {
+            playlist_label(p,r->label,k->playlist_normal,bg,14,23+i*10,96);
+            playlist_label(p,r->value,k->playlist_current,bg,118,23+i*10,128);
+        }
+    }
+    maximum=p->set_count-p->set_visible;
+    if (all || p->set_top!=p->set_drawn_top || p->set_count!=p->set_drawn_count || p->set_pressed!=p->set_drawn_pressed) {
+        settings_sprite_column(p,34,8,258,bottom);
+        if (maximum>0)
+            blit(p,SKIN_PLEDIT,p->set_pressed==SET_PRESS_SCROLL ? 61 : 52,53,8,18,258,
+                 20+p->set_top*(bottom-38)/maximum);
+    }
+    memcpy(p->set_drawn,p->set_rows,sizeof(p->set_drawn));
+    p->set_drawn_count=p->set_count; p->set_drawn_focus=p->set_focus; p->set_drawn_top=p->set_top;
+    p->set_drawn_active=active; p->set_drawn_pressed=p->set_pressed; p->set_have_drawn=1;
+}
+void skin_player_settings_update(SkinPlayer *p,const SkinSettingsRow *rows,int count)
+{
+    SkinSettingsRow *r; const char *name;
+    if (!p) return;
+    if (count<0) count=0;
+    if (count>SKIN_SETTINGS_MAX-5) count=SKIN_SETTINGS_MAX-5;
+    memset(p->set_rows,0,sizeof(p->set_rows));
+    if (count) memcpy(p->set_rows,rows,(size_t)count*sizeof(*rows));
+    r=p->set_rows+count;
+    r->kind=SKIN_ROW_HEADER; strcpy(r->label,"INTERFACE"); ++r;
+    name=(const char *)FilePart((STRPTR)p->path);
+    r->kind=SKIN_ROW_ACTION; r->id=SET_ROW_SKIN; r->action=SKIN_SELECT; strcpy(r->label,"Skin");
+    strncpy(r->value,name && name[0] ? name : "Choose...",sizeof(r->value)-1); ++r;
+    r->kind=SKIN_ROW_ACTION; r->id=SET_ROW_SIZE; r->action=SKIN_SIZE; strcpy(r->label,"Double size");
+    strcpy(r->value,p->resources && p->resources->scale==2 ? "On" : "Off"); ++r;
+    r->kind=SKIN_ROW_ACTION; r->id=SET_ROW_PREFS; r->action=SKIN_INTERFACE; strcpy(r->label,"Next launch");
+    strcpy(r->value,"Preferences..."); ++r;
+    r->kind=SKIN_ROW_ACTION; r->id=SET_ROW_CLASSIC; r->action=SKIN_CLASSIC; strcpy(r->label,"Classic mode");
+    strcpy(r->value,"Switch now"); ++r;
+    p->set_count=(int)(r-p->set_rows);
+    if (p->set_focus>=0 && p->set_focus<p->set_count && p->set_rows[p->set_focus].kind==SKIN_ROW_HEADER) ++p->set_focus;
+    settings_clamp(p);
+    settings_repaint(p,0);
+}
+static void settings_close(SkinPlayer *p)
+{
+    struct Message *m;
+    if (!p->setwin) return;
+    ClearMenuStrip(p->setwin);
+    while ((m=GetMsg(p->setwin->UserPort))!=NULL) ReplyMsg(m);
+    p->set_left=p->setwin->LeftEdge; p->set_top_edge=p->setwin->TopEdge; p->set_position=1;
+    CloseWindow(p->setwin); p->setwin=NULL; p->set_have_drawn=0; p->set_pressed=SET_PRESS_NONE;
+    menu_sync(p);
+}
+static int settings_open(SkinPlayer *p)
+{
+    int scale,left,top,width,height,fit;
+    if (!p || !p->win || !p->resources) return 0;
+    if (p->setwin) { WindowToFront(p->setwin); ActivateWindow(p->setwin); return 1; }
+    scale=p->resources->scale; width=275*scale;
+    if (!p->resources->skin.assets[SKIN_PLEDIT].rgb || width>p->screen->Width || !text_ready(p)) return 0;
+    fit=(p->screen->Height/scale-42)/10;
+    p->set_visible=p->set_count<SKIN_SET_VISIBLE ? p->set_count : SKIN_SET_VISIBLE;
+    if (p->set_visible>fit) p->set_visible=fit;
+    if (p->set_visible<4) return 0;
+    height=(42+p->set_visible*10)*scale;
+    if (p->set_position) { left=p->set_left; top=p->set_top_edge; }
+    else {
+        /* Beside the player, where it does not cover the playlist/EQ. */
+        left=p->win->LeftEdge+p->win->Width; top=p->win->TopEdge;
+        if (left+width>p->screen->Width) left=p->win->LeftEdge-width;
+        if (left<0) left=p->win->LeftEdge;
+    }
+    if (left+width>p->screen->Width) left=p->screen->Width-width;
+    if (top+height>p->screen->Height) top=p->screen->Height-height;
+    if (left<0) left=0;
+    if (top<0) top=0;
+    settings_clamp(p);
+    p->setwin=OpenWindowTags(NULL,WA_CustomScreen,(ULONG)p->screen,
+        WA_Left,left,WA_Top,top,WA_Width,width,WA_Height,height,
+        WA_Borderless,TRUE,WA_Activate,TRUE,WA_RMBTrap,FALSE,
+        WA_DetailPen,p->win->DetailPen,WA_BlockPen,p->win->BlockPen,
+        WA_NewLookMenus,(ULONG)(GfxBase->LibNode.lib_Version>=39),
+        WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|IDCMP_MENUPICK|
+                   IDCMP_VANILLAKEY|IDCMP_RAWKEY|IDCMP_INACTIVEWINDOW|IDCMP_ACTIVEWINDOW,TAG_DONE);
+    if (!p->setwin) return 0;
+    strip_attach(p,STRIP_SETTINGS,p->setwin);
+    p->set_have_drawn=0; p->set_pressed=SET_PRESS_NONE; settings_repaint(p,1); menu_sync(p);
+    return 1;
+}
+int skin_player_settings_open(SkinPlayer *p) { return settings_open(p); }
+void skin_player_settings_close(SkinPlayer *p) { if (p) settings_close(p); }
+int skin_player_settings_visible(SkinPlayer *p) { return p && p->setwin; }
+static int run_action(SkinPlayer *p,int action,SkinEvent *event);
+/* A click, Return or cursor key on the focused row. */
+static int settings_activate(SkinPlayer *p,int direction,SkinEvent *event)
+{
+    const SkinSettingsRow *r;
+    if (p->set_focus<0 || p->set_focus>=p->set_count) return 0;
+    r=&p->set_rows[p->set_focus];
+    if (r->kind==SKIN_ROW_HEADER) return 0;
+    if (r->kind==SKIN_ROW_ACTION && r->action) return run_action(p,r->action,event);
+    event->action=SKIN_SETTING_CHANGE; event->value=r->id; event->target=direction; event->released=1;
+    return 1;
+}
+static int settings_hit(SkinPlayer *p,int x,int y)
+{
+    int bottom=22+settings_rows_height(p);
+    if (y<20) return x>=264 && x<273 && y>=3 && y<12 ? SET_PRESS_CLOSE : SET_PRESS_DRAG;
+    if (x>=258 && x<266 && y<bottom && p->set_count>p->set_visible) return SET_PRESS_SCROLL;
+    if (x>=12 && x<255 && y>=22 && y<bottom) return SET_PRESS_ROW;
+    return SET_PRESS_DRAG;
+}
+static void settings_scroll_to(SkinPlayer *p,int y)
+{
+    int bottom=22+settings_rows_height(p),maximum=p->set_count-p->set_visible;
+    if (maximum<=0) return;
+    p->set_top=(y-29)*maximum/(bottom-38>0 ? bottom-38 : 1);
+    if (p->set_top<0) p->set_top=0;
+    if (p->set_top>maximum) p->set_top=maximum;
+    if (p->set_focus<p->set_top) p->set_focus=p->set_top;
+    if (p->set_focus>=p->set_top+p->set_visible) p->set_focus=p->set_top+p->set_visible-1;
+    settings_repaint(p,0);
+}
+static void settings_step(SkinPlayer *p,int direction)
+{
+    int i=p->set_focus;
+    do { i+=direction; } while (i>=0 && i<p->set_count && p->set_rows[i].kind==SKIN_ROW_HEADER);
+    if (i<0 || i>=p->set_count) return;
+    p->set_focus=i; settings_clamp(p); settings_repaint(p,0);
+}
+static int settings_poll(SkinPlayer *p,SkinEvent *event)
+{
+    struct IntuiMessage *m;
+    while (p->setwin && (m=(struct IntuiMessage *)GetMsg(p->setwin->UserPort))!=NULL) {
+        ULONG type=m->Class; UWORD code=m->Code,qualifier=m->Qualifier;
+        int x=m->MouseX/p->resources->scale,y=m->MouseY/p->resources->scale;
+        int sx=p->screen->MouseX,sy=p->screen->MouseY;
+        int back=(qualifier&(IEQUALIFIER_LSHIFT|IEQUALIFIER_RSHIFT))!=0;
+        ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event));
+        if (type==IDCMP_REFRESHWINDOW) { BeginRefresh(p->setwin); settings_repaint(p,1); EndRefresh(p->setwin,TRUE); }
+        else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) {
+            if (p->set_pressed==SET_PRESS_DRAG) drag_end(p,4);
+            p->set_pressed=SET_PRESS_NONE; settings_repaint(p,0);
+        }
+        else if (type==IDCMP_MENUPICK) { if (menu_action(p,code,event)) return 1; }
+        else if (type==IDCMP_VANILLAKEY) {
+            if (code==27 || code=='t' || code=='T') settings_close(p);
+            else if (code=='\r' || code==' ') { if (settings_activate(p,back ? -1 : 1,event)) return 1; }
+        } else if (type==IDCMP_RAWKEY && code<0x80) {
+            if (code==0x4c || code==0x4d) settings_step(p,code==0x4c ? -1 : 1);
+            else if (code==0x4e || code==0x4f) {
+                const SkinSettingsRow *r=p->set_focus>=0 && p->set_focus<p->set_count ? &p->set_rows[p->set_focus] : NULL;
+                /* Cursor keys change values only; actions need Return/click. */
+                if (r && r->kind==SKIN_ROW_VALUE && settings_activate(p,code==0x4e ? 1 : -1,event)) return 1;
+            }
+        } else if (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN) {
+            p->set_pressed=settings_hit(p,x,y); p->set_drag_x=sx; p->set_drag_y=sy; p->set_row=-1;
+            if (p->set_pressed==SET_PRESS_DRAG) drag_begin(p,4,qualifier);
+            else if (p->set_pressed==SET_PRESS_SCROLL) settings_scroll_to(p,y);
+            else if (p->set_pressed==SET_PRESS_ROW) {
+                int index=p->set_top+(y-22)/10;
+                if (index<p->set_count && p->set_rows[index].kind!=SKIN_ROW_HEADER) { p->set_focus=index; p->set_row=index; }
+            }
+            settings_repaint(p,0);
+        } else if (type==IDCMP_MOUSEMOVE && p->set_pressed==SET_PRESS_DRAG) {
+            drag_move(p,sx-p->set_drag_x,sy-p->set_drag_y); p->set_drag_x=sx; p->set_drag_y=sy;
+        } else if (type==IDCMP_MOUSEMOVE && p->set_pressed==SET_PRESS_SCROLL) {
+            settings_scroll_to(p,y);
+        } else if (type==IDCMP_MOUSEBUTTONS && code==SELECTUP) {
+            int pressed=p->set_pressed,row=p->set_row;
+            p->set_pressed=SET_PRESS_NONE; p->set_row=-1;
+            if (pressed==SET_PRESS_DRAG) drag_end(p,4);
+            settings_repaint(p,0);
+            if (pressed==SET_PRESS_CLOSE && settings_hit(p,x,y)==SET_PRESS_CLOSE) settings_close(p);
+            else if (pressed==SET_PRESS_ROW && row>=0 && settings_hit(p,x,y)==SET_PRESS_ROW &&
+                     p->set_top+(y-22)/10==row) {
+                p->set_focus=row;
+                if (settings_activate(p,back ? -1 : 1,event)) return 1;
+            }
         }
     }
     return 0;
@@ -847,7 +1115,8 @@ static void restore_windows(SkinPlayer *p)
     if (p->restore_playlist && !playlist_open(p)) p->pending_options=1;
     if (p->restore_eq) eq_toggle(p);
     if (p->restore_art) art_open(p);
-    p->restore_playlist=p->restore_eq=p->restore_art=0;
+    if (p->restore_settings) settings_open(p);
+    p->restore_playlist=p->restore_eq=p->restore_art=p->restore_settings=0;
 }
 static void iconify(SkinPlayer *p)
 {
@@ -871,8 +1140,9 @@ static void iconify(SkinPlayer *p)
     if (!p->app_icon) { app_icon_remove(p); skin_player_notice(p,"COULD NOT CREATE APPICON"); return; }
     save_state(p);
     p->restore_playlist=p->plwin!=NULL; p->restore_eq=p->eqwin!=NULL; p->restore_art=p->artwin!=NULL;
+    p->restore_settings=p->setwin!=NULL;
     p->saved_left=p->win->LeftEdge; p->saved_top=p->win->TopEdge;
-    eq_close(p); playlist_close(p); art_close(p); close_window(p);
+    settings_close(p); eq_close(p); playlist_close(p); art_close(p); close_window(p);
     p->pressed=0; p->iconified=1;
 }
 static int uniconify(SkinPlayer *p)
@@ -1149,7 +1419,7 @@ static void change_skin(SkinPlayer *p,int choose)
 {
     char path[512], error[160]; SkinResources *next, *old; int scale;
     WORD left=p->win->LeftEdge,top=p->win->TopEdge;
-    int had_playlist=p->plwin!=NULL,had_eq=p->eqwin!=NULL,had_art=p->artwin!=NULL;
+    int had_playlist=p->plwin!=NULL,had_eq=p->eqwin!=NULL,had_art=p->artwin!=NULL,had_settings=p->setwin!=NULL;
     strcpy(path,p->path); scale=p->resources->scale;
     if (choose) { if (!request_path(p,path)) return; }
     else scale=scale==1 ? 2 : 1;
@@ -1158,13 +1428,14 @@ static void change_skin(SkinPlayer *p,int choose)
     }
     next=load_resources(p,path,scale,error);
     if (!next) { error_request(p,error); return; }
-    save_state(p); old=p->resources; eq_close(p); playlist_close(p); art_close(p); close_window(p); p->resources=next;
+    save_state(p); old=p->resources; settings_close(p); eq_close(p); playlist_close(p); art_close(p); close_window(p); p->resources=next;
     if (!open_window(p,left,top)) {
         p->resources=old; free_resources(p,next);
         if (!open_window(p,left,top)) p->win=NULL;
         if (had_playlist && p->win && !playlist_open(p)) p->pending_options=1;
         if (had_eq && p->win) eq_toggle(p);
         if (had_art && p->win) art_open(p);
+        if (had_settings && p->win) settings_open(p);
         error_request(p,"Could not open the new skin window.");
         return;
     }
@@ -1175,6 +1446,7 @@ static void change_skin(SkinPlayer *p,int choose)
     if (had_playlist && !playlist_open(p)) p->pending_options=1;
     if (had_eq) eq_toggle(p);
     if (had_art) art_open(p);
+    if (had_settings && !settings_open(p)) skin_player_notice(p,"SETTINGS DO NOT FIT THIS SIZE - PRESS T");
     p->art_kind=-1; /* pens changed with the skin: redraw on next update */
 }
 SkinPlayer *skin_player_open(const char *name,int argc,char **argv)
@@ -1277,7 +1549,7 @@ static void player_close(SkinPlayer *p,int defer)
     if (p->visual_timer) DeleteIORequest((struct IORequest *)p->visual_timer);
     if (p->visual_port) DeleteMsgPort(p->visual_port);
     app_icon_remove(p);
-    eq_close(p); playlist_close(p); art_close(p); close_window(p); free_resources(p,p->resources);
+    settings_close(p); eq_close(p); playlist_close(p); art_close(p); close_window(p); free_resources(p,p->resources);
     free_text_bitmap(p->text_source,243,8); free_text_bitmap(p->text_scaled,486,16);
     if (p->playlist_font) CloseFont(p->playlist_font);
     if (p->screen) UnlockPubScreen(NULL,p->screen);
@@ -1307,6 +1579,7 @@ ULONG skin_player_signal(SkinPlayer *p)
             (p->plwin ? 1UL<<p->plwin->UserPort->mp_SigBit : 0) |
             (p->eqwin ? 1UL<<p->eqwin->UserPort->mp_SigBit : 0) |
             (p->artwin ? 1UL<<p->artwin->UserPort->mp_SigBit : 0) |
+            (p->setwin ? 1UL<<p->setwin->UserPort->mp_SigBit : 0) |
             (p->app_port ? 1UL<<p->app_port->mp_SigBit : 0) |
             (p->visual_port ? 1UL<<p->visual_port->mp_SigBit : 0) : 0; }
 struct Window *skin_player_window(SkinPlayer *p) { return p ? p->win : NULL; }
@@ -1354,7 +1627,12 @@ static int menu_action(SkinPlayer *p,UWORD code,SkinEvent *event)
         for (w=STRIP_MAIN;w<STRIP_COUNT;++w) p->strips[w].checks=~bits;
     }
     menu_sync(p);
-    if (action==SKIN_INTERFACE) { mint_interface_preferences(p->win); return 0; }
+    return run_action(p,action,event);
+}
+/* Shared by the menus and the settings window's Interface rows. */
+static int run_action(SkinPlayer *p,int action,SkinEvent *event)
+{
+    if (action==SKIN_INTERFACE) { mint_interface_preferences(p->setwin ? p->setwin : p->win); return 0; }
     if (action==SKIN_SELECT || action==SKIN_SIZE) { change_skin(p,action==SKIN_SELECT); menu_sync(p); return 0; }
     if (internal_action(p,action)) { menu_sync(p); return 0; }
     event->action=action; event->released=1; return 1;
@@ -1515,6 +1793,7 @@ int skin_player_poll(SkinPlayer *p,SkinEvent *event)
     eq_poll(p);
     if (playlist_poll(p,event)) return 1;
     if (art_poll(p,event)) return 1;
+    if (settings_poll(p,event)) return 1;
     if (!p->win) return 0; /* iconified from a utility window's menu */
     while (p->win && (msg=(struct IntuiMessage *)GetMsg(p->win->UserPort))!=NULL) {
         ULONG type=msg->Class; UWORD code=msg->Code;

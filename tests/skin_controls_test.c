@@ -148,6 +148,21 @@ static void window_tests(void)
       CHECK(skin_window_group(a,4,0,2)==11); CHECK(skin_window_group(a,4,3,2)==11);
       a[3].x=301; CHECK(skin_window_group(a,4,0,2)==3);
       skin_window_snap(a,4,3,8,8,&dx,&dy); CHECK(dx==-6 && dy==0);
-      CHECK(skin_window_group(a,5,0,2)==0); }
+      CHECK(skin_window_group(a,SKIN_WINDOW_MAX+1,0,2)==0); }
 }
-int main(void) { order_tests(); block_move_tests(); pending_order_tests(); list_tests(); audio_tests(); window_tests(); clock_tests(); puts("Skin controls: order/history, shared list/selection, balance, EQ bypass/headroom, spectrum and mapping passed"); return 0; }
+static void settings_tests(void)
+{
+    SkinSettingsRow rows[SKIN_SETTINGS_MAX]; int n=0,i;
+    /* Choices wrap both ways; any non-negative step moves forward. */
+    CHECK(skin_settings_cycle(0,1,0,4)==1); CHECK(skin_settings_cycle(4,1,0,4)==0);
+    CHECK(skin_settings_cycle(0,-1,0,4)==4); CHECK(skin_settings_cycle(10,1,1,10)==1);
+    CHECK(skin_settings_cycle(1,-1,1,10)==10); CHECK(skin_settings_cycle(2,0,0,3)==3);
+    skin_settings_row(rows,&n,SKIN_ROW_HEADER,0,"PLAYBACK",NULL);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,7,"A label longer than sixteen","A value much longer than the row can hold");
+    CHECK(n==2 && rows[0].kind==SKIN_ROW_HEADER && !rows[0].value[0]);
+    CHECK(rows[1].id==7 && strlen(rows[1].label)==sizeof(rows[1].label)-1 && strlen(rows[1].value)==sizeof(rows[1].value)-1);
+    for (i=n;i<SKIN_SETTINGS_MAX+4;++i) skin_settings_row(rows,&n,SKIN_ROW_VALUE,i,"x","y");
+    CHECK(n==SKIN_SETTINGS_MAX);
+    skin_settings_row(NULL,&n,SKIN_ROW_VALUE,0,"x","y"); CHECK(n==SKIN_SETTINGS_MAX);
+}
+int main(void) { order_tests(); block_move_tests(); pending_order_tests(); list_tests(); audio_tests(); window_tests(); clock_tests(); settings_tests(); puts("Skin controls: order/history, shared list/selection, balance, EQ bypass/headroom, spectrum, mapping and settings rows passed"); return 0; }

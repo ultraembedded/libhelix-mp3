@@ -35,10 +35,25 @@ void skin_player_playlist_durations(SkinPlayer *player,const int *durations);
 const char *skin_player_audio_arg(int argc, char **argv);
 /* 64x64 RGB artwork from the frontend; hashed only while the window shows. */
 void skin_player_artwork(SkinPlayer *player,const unsigned char *rgb,int valid,int loading,int radio);
+/* Artwork switched off in Settings: the artwork window says so. */
+void skin_player_artwork_enabled(SkinPlayer *player,int enabled);
+/* True while the artwork window is open (frontends skip art work otherwise). */
+int skin_player_artwork_visible(SkinPlayer *player);
 /* Modal single-line requester on the skin's screen; 1 when accepted. */
 int skin_player_request_text(SkinPlayer *player,const char *title,char *buffer,int size);
 /* Classic start: apply the saved skin balance/EQ without opening a skin. */
 void skin_player_restore_audio(const char *name);
+/* Skinned settings window (PLEDIT-framed, shared by SGT and SR). The
+ * frontend owns its rows: clicking a VALUE row (or a frontend ACTION row
+ * with action 0) reports SKIN_SETTING_CHANGE with the row id and a +1/-1
+ * direction; an ACTION row with a SkinAction runs it like its menu item.
+ * The player appends its own Interface rows (skin, size, Classic). */
+void skin_player_settings_update(SkinPlayer *player,const SkinSettingsRow *rows,int count);
+/* 1 when the window is open (raised if it already was); 0 when the skin
+ * lacks PLEDIT artwork or the screen is too small: use the classic window. */
+int skin_player_settings_open(SkinPlayer *player);
+void skin_player_settings_close(SkinPlayer *player);
+int skin_player_settings_visible(SkinPlayer *player);
 /* Final exit, after the last skin_player_close(). */
 void skin_player_shutdown(void);
 int skin_player_is_skin(const char *path);

@@ -112,6 +112,149 @@ static void GuiSkinPlaylistUpdate(HelixAmp3Gui *gui)
     skin_player_playlist_update(gSkinPlayer,gui->playlist.count,gui->playlist.selected,
         gui->playlist.current,GuiSkinPlaylistName,gui);
 }
+/* ---- Skinned settings page ----------------------------------------------
+ * The skin's Settings window edits MintAMP-GT's saved settings through the
+ * classic window's own handlers, so validation, status text and the
+ * ENVARC deferral while playing stay identical. The classic gadgets are
+ * kept in step for a later switch to the classic interface. */
+enum { GSET_SPEED=1, GSET_QUALITY, GSET_SUBBANDS, GSET_RATE, GSET_CHANNELS, GSET_WIDTH,
+    GSET_DELAY, GSET_BUFFER, GSET_FASTMEM, GSET_DECODE_FIRST, GSET_FILTER, GSET_HTTPS,
+    GSET_ART, GSET_ART_COLOUR, GSET_ART_CACHE, GSET_ART_CLEAN };
+static const char *GuiSkinOnOff(int on) { return on ? "On" : "Off"; }
+static const char *GuiSkinLabel(const STRPTR *labels,int index,int count)
+{ return (const char *)labels[index>=0 && index<count ? index : 0]; }
+static void GuiSkinSettingsRows(HelixAmp3Gui *gui)
+{
+    SkinSettingsRow rows[SKIN_SETTINGS_MAX]; int n=0,speed=SpeedModeIndex(gui); char text[24];
+    if (!gSkinPlayer) return;
+    skin_settings_row(rows,&n,SKIN_ROW_HEADER,0,"PLAYBACK",NULL);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_SPEED,"Speed mode",
+        speed==4 ? "22050 mono ultra" : GuiSkinLabel(kSpeedModeLabels,speed,5));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_QUALITY,"Quality",GuiSkinLabel(kQualityLabels,gui->qualityIndex,4));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_SUBBANDS,"Subbands",
+        GuiSkinLabel(kSubbandCapLabels,gui->subbandCapIndex,(int)SUBBAND_CAP_COUNT));
+    snprintf(text,sizeof(text),"%s Hz",GuiSkinLabel(kRateLabels,gui->rateIndex,6));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_RATE,"Output rate",text);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_CHANNELS,"Channels",GuiSkinLabel(kChannelModeLabels,ChannelModeIndex(gui),3));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_WIDTH,"Stereo width",
+        gui->fakeStereo ? GuiSkinLabel(kFakeStereoWidthLabels,gui->fakeStereoWidthIndex,5) : "-");
+    snprintf(text,sizeof(text),"%s samples",GuiSkinLabel(kFakeStereoDelayLabels,gui->fakeStereoDelayIndex,5));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_DELAY,"Stereo delay",gui->fakeStereo ? text : "-");
+    snprintf(text,sizeof(text),"%d s",gui->bufferSeconds);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_BUFFER,"Buffer",gui->decodeThenPlay ? "Decode first" : text);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_DECODE_FIRST,"Decode first",GuiSkinOnOff(gui->decodeThenPlay));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_FASTMEM,"Fast RAM",GuiSkinOnOff(gui->fastMem));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_FILTER,"Audio filter",GuiSkinOnOff(gui->hardwareFilter));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_HTTPS,"HTTPS wait",
+        kHttpsWaitDesc[gui->httpsWaitIndex>=0 && gui->httpsWaitIndex<HTTPS_WAIT_COUNT ? gui->httpsWaitIndex : 0]);
+    skin_settings_row(rows,&n,SKIN_ROW_HEADER,0,"ARTWORK",NULL);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_ART,"Artwork",GuiSkinOnOff(gui->artEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_ART_COLOUR,"Colour art",GuiSkinOnOff(gui->artColorEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,GSET_ART_CACHE,"Art cache",GuiSkinOnOff(gui->artCacheEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_ACTION,GSET_ART_CLEAN,"Clear cache","Clean now");
+    skin_player_settings_update(gSkinPlayer,rows,n);
+}
+static struct Gadget *GuiSkinFindGadget(HelixAmp3Gui *gui,UWORD id)
+{
+    struct Gadget *g;
+    for (g=gui->gadgets;g;g=g->NextGadget) if (g->GadgetID==id) return g;
+    return NULL;
+}
+static void GuiSkinToggleFilter(HelixAmp3Gui *gui)
+{
+    gui->hardwareFilter=!gui->hardwareFilter;
+    ApplyHardwareAudioFilter(gui);
+    if (gui->gadHardwareFilter)
+        GT_SetGadgetAttrs(gui->gadHardwareFilter,gui->win,NULL,GTCB_Checked,(ULONG)gui->hardwareFilter,TAG_DONE);
+    skin_player_notice(gSkinPlayer,gui->hardwareFilter ? "AUDIO FILTER ON" : "AUDIO FILTER OFF");
+    SaveGuiSettings(gui);
+}
+static void GuiSkinSettingChange(HelixAmp3Gui *gui,int id,int dir)
+{
+    struct Gadget fake, *real=NULL; UWORD gid=0; int code=0,shown=-1;
+    int busy=gui->playbackActive || gui->playbackDonePending;
+    char msg[64];
+    if ((id==GSET_SPEED || id==GSET_QUALITY || id==GSET_SUBBANDS || id==GSET_RATE ||
+         id==GSET_CHANNELS || id==GSET_BUFFER || id==GSET_FASTMEM) && busy) {
+        skin_player_notice(gSkinPlayer,"STOP PLAYBACK TO CHANGE THIS SETTING"); return;
+    }
+    switch (id) {
+    case GSET_SPEED: gid=GID_SPEED_MODE; real=gui->gadSpeedMode; code=skin_settings_cycle(SpeedModeIndex(gui),dir,0,4); break;
+    case GSET_QUALITY: gid=GID_QUALITY; code=skin_settings_cycle(gui->qualityIndex,dir,HELIXAMP3_QUALITY_MIN,HELIXAMP3_QUALITY_MAX); break;
+    case GSET_SUBBANDS: gid=GID_SUBBAND_CAP; code=skin_settings_cycle(gui->subbandCapIndex,dir,0,(int)SUBBAND_CAP_COUNT-1); break;
+    case GSET_RATE: gid=GID_RATE; real=gui->gadRate; code=skin_settings_cycle(gui->rateIndex,dir,0,5); break;
+    case GSET_CHANNELS:
+        if (gui->cd32Ultrafast) { skin_player_notice(gSkinPlayer,"22050 MONO ULTRAFAST IS MONO ONLY"); return; }
+        gid=GID_CHANNEL_MODE; real=gui->gadChannelMode; code=skin_settings_cycle(ChannelModeIndex(gui),dir,0,2); break;
+    case GSET_WIDTH: case GSET_DELAY:
+        if (!gui->fakeStereo) { skin_player_notice(gSkinPlayer,"SET CHANNELS TO FAKE STEREO FIRST"); return; }
+        gid=id==GSET_WIDTH ? GID_FAKE_STEREO_WIDTH : GID_FAKE_STEREO_DELAY;
+        real=id==GSET_WIDTH ? gui->gadFakeStereoWidth : gui->gadFakeStereoDelay;
+        code=skin_settings_cycle(id==GSET_WIDTH ? gui->fakeStereoWidthIndex : gui->fakeStereoDelayIndex,dir,0,4); break;
+    case GSET_BUFFER:
+        if (gui->decodeThenPlay) { skin_player_notice(gSkinPlayer,"BUFFER IS NOT USED WITH DECODE FIRST"); return; }
+        SetGuiBuffer(gui,skin_settings_cycle(gui->bufferSeconds,dir,1,10),TRUE); break;
+    case GSET_FASTMEM:
+        /* Its handler always updates the real checkbox. */
+        if (!gui->gadFastMem) { skin_player_notice(gSkinPlayer,"FAST RAM OPTION UNAVAILABLE"); return; }
+        gid=GID_FAST_MEM; real=gui->gadFastMem; code=!gui->fastMem; break;
+    case GSET_DECODE_FIRST: SetDecodeThenPlay(gui,!gui->decodeThenPlay); break;
+    case GSET_FILTER: GuiSkinToggleFilter(gui); GuiSkinSettingsRows(gui); return;
+    case GSET_HTTPS:
+        gui->httpsWaitIndex=skin_settings_cycle(gui->httpsWaitIndex,dir,0,HTTPS_WAIT_COUNT-1);
+        SyncMenuChecks(gui);
+        sprintf(msg,"HTTPS stream wait set to %s.",kHttpsWaitDesc[gui->httpsWaitIndex]);
+        SetStatus(gui,msg); SaveGuiSettings(gui); break;
+    case GSET_ART: SetArtworkEnabled(gui,!gui->artEnabled); break;
+    case GSET_ART_COLOUR:
+        gui->artColorEnabled=!gui->artColorEnabled;
+        SetMenuItemChecked(gui,MENUNUM_PLAYBACK,ITEMNUM_ARTCOLOR,gui->artColorEnabled);
+        /* Rebuild the 64x64 buffer the skin shows in colour or grey. */
+        UpdateArtDisplay(gui);
+        if (gui->artDecode.active) SendTimerRequest(gui,ART_TIMER_MICROS);
+        SetStatus(gui,gui->artColorEnabled ? "Colour artwork enabled." : "Black and white artwork enabled.");
+        SaveGuiSettings(gui); break;
+    case GSET_ART_CACHE:
+        gui->artCacheEnabled=!gui->artCacheEnabled;
+        SetMenuItemChecked(gui,MENUNUM_PLAYBACK,ITEMNUM_ARTCACHE,gui->artCacheEnabled);
+        SetStatus(gui,gui->artCacheEnabled ? "Artwork cache enabled." : "Artwork cache disabled.");
+        SaveGuiSettings(gui); break;
+    case GSET_ART_CLEAN: CleanArtworkCache(gui); break;
+    default: return;
+    }
+    if (gid) {
+        if (!real) real=GuiSkinFindGadget(gui,gid);
+        if (!real) {
+            /* Not busy (checked above), so these handlers never touch gad. */
+            memset(&fake,0,sizeof(fake)); fake.GadgetID=gid; real=&fake;
+        }
+        HandleGuiAction(gui,real,(UWORD)code,IDCMP_GADGETUP,TRUE);
+        switch (id) {
+        case GSET_SPEED: shown=SpeedModeIndex(gui); break;
+        case GSET_QUALITY: shown=gui->qualityIndex; break;
+        case GSET_SUBBANDS: shown=gui->subbandCapIndex; break;
+        case GSET_RATE: shown=gui->rateIndex; break;
+        case GSET_CHANNELS: shown=ChannelModeIndex(gui); break;
+        case GSET_WIDTH: shown=gui->fakeStereoWidthIndex; break;
+        case GSET_DELAY: shown=gui->fakeStereoDelayIndex; break;
+        }
+        /* A click on the classic cycle moves it itself; a skin change must. */
+        if (shown>=0 && real!=&fake) GT_SetGadgetAttrs(real,gui->win,NULL,GTCY_Active,(ULONG)shown,TAG_DONE);
+        UpdateChannelGadgetState(gui);
+    }
+    if (gui->statusText[0]) skin_player_notice(gSkinPlayer,gui->statusText);
+    GuiSkinSettingsRows(gui);
+}
+static void GuiSkinSettings(HelixAmp3Gui *gui)
+{
+    if (skin_player_settings_visible(gSkinPlayer)) { skin_player_settings_close(gSkinPlayer); return; }
+    GuiSkinSettingsRows(gui);
+    if (skin_player_settings_open(gSkinPlayer)) return;
+    /* No PLEDIT artwork or too small a screen: the classic window serves. */
+    skin_player_notice(gSkinPlayer,"SKIN CANNOT SHOW SETTINGS - USING CLASSIC WINDOW");
+    if (gui->win) GuiSkinHideSettings(gui);
+    else GuiRestoreFromAppIcon(gui);
+}
 static void GuiSkinPoll(HelixAmp3Gui *gui)
 {
     SkinEvent e;
@@ -121,10 +264,8 @@ static void GuiSkinPoll(HelixAmp3Gui *gui)
         switch (e.action) {
         case SKIN_QUIT: gui->closeRequested=1; return;
         case SKIN_ABOUT: ShowAbout(gui); break;
-        case SKIN_SETTINGS:
-            if (gui->win) GuiSkinHideSettings(gui);
-            else GuiRestoreFromAppIcon(gui);
-            break;
+        case SKIN_SETTINGS: GuiSkinSettings(gui); break;
+        case SKIN_SETTING_CHANGE: GuiSkinSettingChange(gui,e.value,e.target); break;
         case SKIN_BROWSE:
             skin_player_order_cancel(gSkinPlayer);
             gSkinPendingTrack=-1; ChooseMp3(gui); break;
@@ -215,13 +356,7 @@ static void GuiSkinPoll(HelixAmp3Gui *gui)
             skin_player_notice(gSkinPlayer,"CONTROL NOT AVAILABLE"); break;
         case SKIN_CLASSIC:
             GuiSkinToClassic(gui); return;
-        case SKIN_FILTER:
-            gui->hardwareFilter=!gui->hardwareFilter;
-            ApplyHardwareAudioFilter(gui);
-            if (gui->gadHardwareFilter)
-                GT_SetGadgetAttrs(gui->gadHardwareFilter,gui->win,NULL,GTCB_Checked,(ULONG)gui->hardwareFilter,TAG_DONE);
-            skin_player_notice(gSkinPlayer,gui->hardwareFilter ? "AUDIO FILTER ON" : "AUDIO FILTER OFF");
-            SaveGuiSettings(gui); break;
+        case SKIN_FILTER: GuiSkinToggleFilter(gui); break;
         case SKIN_INFO: GuiSkinInfo(gui); break;
         case SKIN_STREAM: GuiSkinStream(gui); break;
         case SKIN_SEEK_STEP:
@@ -271,6 +406,8 @@ static void GuiSkinUpdate(HelixAmp3Gui *gui,int tick)
     snprintf(state.debug_text,sizeof(state.debug_text),"BUF %luMS SPARE %ldMS UNDERRUN %lu",gGuiPlaybackStatus.halfBufferMs,gGuiPlaybackStatus.spareMs,gGuiPlaybackStatus.underruns);
     skin_player_update(gSkinPlayer,&state,tick);
     GuiSkinPlaylistUpdate(gui);
+    skin_player_artwork_enabled(gSkinPlayer,gui->artEnabled);
     skin_player_artwork(gSkinPlayer,gui->artRGBBuf,gui->artEnabled && gui->artValid,
         gui->artLoading || gui->artDecode.active,IsRadioInputName(gui->inputName));
+    if (skin_player_settings_visible(gSkinPlayer)) GuiSkinSettingsRows(gui);
 }

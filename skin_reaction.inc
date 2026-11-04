@@ -106,6 +106,188 @@ static void MrSkinPlaylistUpdate(MrApp *app)
     skin_player_playlist_update(gSkinPlayer,app->playlistCount,app->playlistSelected,
         app->playlistCurrent,MrSkinPlaylistName,app);
 }
+/* ---- Skinned settings page ----------------------------------------------
+ * The skin's Settings window edits MintAMP-SR's saved settings. ReAction
+ * reads the classic choosers back (SyncFromGadgets), so every change is
+ * written to the gadget objects too, with or without their window. Like
+ * MintAMP-SGT, decoder settings wait until playback has stopped. */
+enum { RSET_SPEED=1, RSET_QUALITY, RSET_SUBBANDS, RSET_RATE, RSET_CHANNELS, RSET_FAKE,
+    RSET_DELAY, RSET_BUFFER, RSET_FASTMEM, RSET_DECODE_FIRST, RSET_FILTER, RSET_HTTPS,
+    RSET_ART, RSET_ART_COLOUR, RSET_ART_CACHE, RSET_ART_CLEAN };
+static const char *MrSkinOnOff(int on) { return on ? "On" : "Off"; }
+static const char *MrSkinLabel(const STRPTR *labels,int index,int count)
+{ return (const char *)labels[index>=0 && index<count ? index : 0]; }
+static void MrSkinSettingsRows(MrApp *app)
+{
+    SkinSettingsRow rows[SKIN_SETTINGS_MAX]; int n=0,speed=SpeedChoiceFromApp(app); char text[24];
+    if (!gSkinPlayer) return;
+    skin_settings_row(rows,&n,SKIN_ROW_HEADER,0,"PLAYBACK",NULL);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_SPEED,"Speed mode",
+        speed==3 ? "22050 mono ultra" : speed==1 ? "Superfast" : MrSkinLabel(kSpeedLabels,speed,4));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_QUALITY,"Quality",MrSkinLabel(kQualityLabels,app->qualityIndex,4));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_SUBBANDS,"Subbands",
+        MrSkinLabel(kSubbandCapLabels,app->subbandCapIndex,(int)SUBBAND_CAP_COUNT));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_RATE,"Output rate",MrSkinLabel(kRateLabels,app->rateIndex,MR_RATE_COUNT));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_CHANNELS,"Channels",
+        app->fakeStereo ? "Fake stereo" : MrSkinLabel(kChannelLabels,app->mono ? 1 : 0,2));
+    snprintf(text,sizeof(text),"Width %d",app->fakeStereoWidthIndex+1);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_FAKE,"Fake stereo",app->fakeStereo ? text : "Off");
+    snprintf(text,sizeof(text),"%s samples",MrSkinLabel(kDelayLabels,app->fakeStereoDelayIndex,5));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_DELAY,"Stereo delay",app->fakeStereo ? text : "-");
+    snprintf(text,sizeof(text),"%d s",app->bufferSeconds);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_BUFFER,"Buffer",app->decodeThenPlay ? "Decode first" : text);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_DECODE_FIRST,"Decode first",MrSkinOnOff(app->decodeThenPlay));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_FASTMEM,"Fast RAM",MrSkinOnOff(app->fastMem));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_FILTER,"Audio filter",MrSkinOnOff(app->hardwareFilter));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_HTTPS,"HTTPS wait",
+        kHttpsWaitDesc[app->httpsWaitIndex>=0 && app->httpsWaitIndex<HTTPS_WAIT_COUNT ? app->httpsWaitIndex : 0]);
+    skin_settings_row(rows,&n,SKIN_ROW_HEADER,0,"ARTWORK",NULL);
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_ART,"Artwork",MrSkinOnOff(app->artEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_ART_COLOUR,"Colour art",MrSkinOnOff(app->artColorEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_VALUE,RSET_ART_CACHE,"Art cache",MrSkinOnOff(app->artCacheEnabled));
+    skin_settings_row(rows,&n,SKIN_ROW_ACTION,RSET_ART_CLEAN,"Clear cache","Clean now");
+    skin_player_settings_update(gSkinPlayer,rows,n);
+}
+/* Mirror the decoder settings into the classic gadget objects. */
+static void MrSkinPushGadgets(MrApp *app)
+{
+    MrSetGadgetAttr(app->rateGad,app->win,CHOOSER_Selected,(ULONG)app->rateIndex);
+    MrSetGadgetAttr(app->qualityGad,app->win,CHOOSER_Selected,(ULONG)app->qualityIndex);
+    MrSetGadgetAttr(app->subbandCapGad,app->win,CHOOSER_Selected,(ULONG)app->subbandCapIndex);
+    MrSetGadgetAttr(app->channelGad,app->win,CHOOSER_Selected,(ULONG)(app->mono ? 1 : 0));
+    MrSetGadgetAttr(app->widthGad,app->win,CHOOSER_Selected,(ULONG)(app->fakeStereo ? app->fakeStereoWidthIndex+1 : 0));
+    MrSetGadgetAttr(app->delayGad,app->win,CHOOSER_Selected,(ULONG)app->fakeStereoDelayIndex);
+    MrSetGadgetAttr(app->bufferGad,app->win,SLIDER_Level,(ULONG)app->bufferSeconds);
+    MrSetGadgetAttr(app->fastMemGad,app->win,GA_Selected,(ULONG)(app->fastMem ? TRUE : FALSE));
+    if (app->speedGad) {
+        const STRPTR *labels=app->rateIndex==MR_RATE_22050_INDEX ? kSpeedLabels : kSpeedLabelsNo22050;
+        if (app->win) SetGadgetAttrs((struct Gadget *)app->speedGad,app->win,NULL,CHOOSER_LabelArray,(ULONG)labels,
+            CHOOSER_Selected,(ULONG)SpeedChoiceFromApp(app),TAG_DONE);
+        else SetAttrs(app->speedGad,CHOOSER_LabelArray,(ULONG)labels,CHOOSER_Selected,(ULONG)SpeedChoiceFromApp(app),TAG_DONE);
+    }
+    UpdateChannelGadgetState(app);
+    UpdateFastMemGadgetState(app);
+}
+static void MrSkinSetSpeed(MrApp *app,int choice)
+{
+    /* The same mapping as the classic Speed chooser (SyncFromGadgets). */
+    app->cd32Ultrafast=app->rateIndex==MR_RATE_22050_INDEX && choice==3;
+    app->ultrafast=choice==2;
+    app->superfastLowrate=choice==1 || app->cd32Ultrafast;
+    if (app->cd32Ultrafast) { app->fastLowrate=1; app->mono=1; app->fakeStereo=0; }
+    else if (app->ultrafast) app->fastLowrate=0;
+    else app->fastLowrate=app->superfastLowrate;
+}
+static void MrSkinToggleFilter(MrApp *app)
+{
+    app->hardwareFilter=!app->hardwareFilter;
+    ApplyHardwareAudioFilter(app);
+    MrSetGadgetAttr(app->filterGad,app->win,GA_Text,(ULONG)(app->hardwareFilter ? "FLT*" : "FLT"));
+    skin_player_notice(gSkinPlayer,app->hardwareFilter ? "AUDIO FILTER ON" : "AUDIO FILTER OFF");
+    if (!app->playbackActive && !app->playbackDonePending) SaveSettings(app);
+}
+static void MrSkinSettingChange(MrApp *app,int id,int dir)
+{
+    int busy=app->playbackActive || app->playbackDonePending,decoder=0;
+    char msg[64];
+    msg[0]=0;
+    switch (id) {
+    case RSET_SPEED: case RSET_QUALITY: case RSET_SUBBANDS: case RSET_RATE: case RSET_CHANNELS:
+    case RSET_FAKE: case RSET_BUFFER: case RSET_FASTMEM:
+        if (busy) { skin_player_notice(gSkinPlayer,"STOP PLAYBACK TO CHANGE THIS SETTING"); return; }
+        decoder=1; break;
+    case RSET_DELAY: decoder=1; break;
+    }
+    switch (id) {
+    case RSET_SPEED:
+        MrSkinSetSpeed(app,skin_settings_cycle(SpeedChoiceFromApp(app),dir,0,app->rateIndex==MR_RATE_22050_INDEX ? 3 : 2));
+        SafeCopy(msg,sizeof(msg),app->cd32Ultrafast ? "22050 mono ultrafast enabled." : app->ultrafast ? "Ultrafast enabled." :
+            app->superfastLowrate ? "Superfast low-rate enabled." : "Standard speed enabled.");
+        break;
+    case RSET_QUALITY: app->qualityIndex=skin_settings_cycle(app->qualityIndex,dir,MR_QUALITY_MIN,MR_QUALITY_MAX);
+        SafeCopy(msg,sizeof(msg),"Quality profile updated."); break;
+    case RSET_SUBBANDS: app->subbandCapIndex=skin_settings_cycle(app->subbandCapIndex,dir,0,(int)SUBBAND_CAP_COUNT-1);
+        SafeCopy(msg,sizeof(msg),"Manual subband cap updated."); break;
+    case RSET_RATE:
+        app->rateIndex=skin_settings_cycle(app->rateIndex,dir,0,MR_RATE_COUNT-1);
+        UpdateSpeedGadgetChoices(app); /* leaves 22050 mono ultrafast off 22050 Hz */
+        SafeCopy(msg,sizeof(msg),"Output sample rate updated."); break;
+    case RSET_CHANNELS:
+        if (app->cd32Ultrafast) { skin_player_notice(gSkinPlayer,"22050 MONO ULTRAFAST IS MONO ONLY"); return; }
+        if (app->fakeStereo) { skin_player_notice(gSkinPlayer,"TURN FAKE STEREO OFF FIRST"); return; }
+        app->mono=!app->mono; SafeCopy(msg,sizeof(msg),app->mono ? "Mono output enabled." : "Stereo output enabled."); break;
+    case RSET_FAKE: {
+        /* Off, then widths 1..5, as the classic Mode/width chooser. */
+        int v=skin_settings_cycle(app->fakeStereo ? app->fakeStereoWidthIndex+1 : 0,dir,0,5);
+        if (app->cd32Ultrafast) { skin_player_notice(gSkinPlayer,"22050 MONO ULTRAFAST IS MONO ONLY"); return; }
+        app->fakeStereo=v>0; app->fakeStereoWidthIndex=v>0 ? v-1 : 0;
+        SafeCopy(msg,sizeof(msg),app->fakeStereo ? "Fake-stereo output enabled." : "Fake stereo off.");
+        break;
+    }
+    case RSET_DELAY:
+        if (!app->fakeStereo) { skin_player_notice(gSkinPlayer,"TURN FAKE STEREO ON FIRST"); return; }
+        app->fakeStereoDelayIndex=skin_settings_cycle(app->fakeStereoDelayIndex,dir,0,4);
+        SafeCopy(msg,sizeof(msg),"Fake-stereo delay updated."); break;
+    case RSET_BUFFER:
+        if (app->decodeThenPlay) { skin_player_notice(gSkinPlayer,"BUFFER IS NOT USED WITH DECODE FIRST"); return; }
+        app->bufferSeconds=skin_settings_cycle(app->bufferSeconds,dir,1,10);
+        SafeCopy(msg,sizeof(msg),"Buffer depth updated."); break;
+    case RSET_FASTMEM:
+        if (MrIsRadioInput(app->inputName)) { skin_player_notice(gSkinPlayer,"FAST RAM PRELOAD IS FOR LOCAL FILES"); return; }
+        app->fastMem=!app->fastMem;
+        SafeCopy(msg,sizeof(msg),app->fastMem ? "File preload into Fast RAM enabled." : "File preload into Fast RAM disabled."); break;
+    case RSET_DECODE_FIRST: SetDecodeThenPlay(app,!app->decodeThenPlay); break;
+    case RSET_FILTER: MrSkinToggleFilter(app); MrSkinSettingsRows(app); return;
+    case RSET_HTTPS:
+        app->httpsWaitIndex=skin_settings_cycle(app->httpsWaitIndex,dir,0,HTTPS_WAIT_COUNT-1);
+        sprintf(msg,"HTTPS stream wait set to %s.",kHttpsWaitDesc[app->httpsWaitIndex]);
+        SetStatus(app,msg); SyncMenuChecks(app); SaveSettings(app); break;
+    case RSET_ART:
+        app->artEnabled=!app->artEnabled; app->artCacheBypass=0;
+        if (app->inputName[0]) RefreshFileInfoAndTags(app);
+        SetStatus(app,app->artEnabled ? (app->artValid ? "Artwork enabled." : "No artwork.") : "Artwork disabled.");
+        SyncMenuChecks(app); SaveSettings(app); break;
+    case RSET_ART_COLOUR:
+        app->artColorEnabled=!app->artColorEnabled;
+        if (app->artColorEnabled && app->artValid) BuildArtColorPens(app); else ReleaseArtColorPens(app);
+        DrawArtPanel(app);
+        SetStatus(app,app->artColorEnabled ? "Colour artwork enabled." : "Colour artwork disabled.");
+        SyncMenuChecks(app); SaveSettings(app); break;
+    case RSET_ART_CACHE:
+        app->artCacheEnabled=!app->artCacheEnabled;
+        SetStatus(app,app->artCacheEnabled ? "Artwork cache enabled." : "Artwork cache disabled.");
+        SyncMenuChecks(app); SaveSettings(app); break;
+    case RSET_ART_CLEAN: CleanArtworkCache(app); break;
+    default: return;
+    }
+    if (decoder) {
+        MrSkinPushGadgets(app);
+        SetStatus(app,msg);
+        /* No ENVARC writes mid-stream; exit saves the latest values. */
+        if (!busy) SaveSettings(app);
+    }
+    if (app->shownStatus[0]) skin_player_notice(gSkinPlayer,app->shownStatus);
+    MrSkinSettingsRows(app);
+}
+static void MrSkinSettings(MrApp *app)
+{
+    if (skin_player_settings_visible(gSkinPlayer)) { skin_player_settings_close(gSkinPlayer); return; }
+    MrSkinSettingsRows(app);
+    if (skin_player_settings_open(gSkinPlayer)) return;
+    /* No PLEDIT artwork or too small a screen: the classic window serves. */
+    skin_player_notice(gSkinPlayer,"SKIN CANNOT SHOW SETTINGS - USING CLASSIC WINDOW");
+    if (app->win) MrSkinHideSettings(app); else MrUniconify(app);
+}
+/* The skin shows grey artwork when colour artwork is off, as the classic
+ * panel does. Converted only while the artwork window is open. */
+static const unsigned char *MrSkinArtwork(MrApp *app)
+{
+    static unsigned char grey[MR_ART_W*MR_ART_H*3];
+    int i;
+    if (app->artColorEnabled || !app->artValid || !skin_player_artwork_visible(gSkinPlayer)) return app->artRGBBuf;
+    for (i=0;i<MR_ART_W*MR_ART_H;++i) grey[i*3]=grey[i*3+1]=grey[i*3+2]=app->artGreyBuf[i];
+    return grey;
+}
 static void MrSkinPoll(MrApp *app,int *done)
 {
     SkinEvent e;
@@ -113,8 +295,8 @@ static void MrSkinPoll(MrApp *app,int *done)
         switch (e.action) {
         case SKIN_QUIT: *done=1; return;
         case SKIN_ABOUT: ShowAbout(app); break;
-        case SKIN_SETTINGS:
-            if (app->win) MrSkinHideSettings(app); else MrUniconify(app); break;
+        case SKIN_SETTINGS: MrSkinSettings(app); break;
+        case SKIN_SETTING_CHANGE: MrSkinSettingChange(app,e.value,e.target); break;
         case SKIN_BROWSE:
             skin_player_order_cancel(gSkinPlayer);
             gSkinPendingTrack=-1; BrowseForFile(app); break;
@@ -210,12 +392,7 @@ static void MrSkinPoll(MrApp *app,int *done)
             skin_player_notice(gSkinPlayer,"CONTROL NOT AVAILABLE"); break;
         case SKIN_CLASSIC:
             MrSkinToClassic(app); return;
-        case SKIN_FILTER:
-            app->hardwareFilter=!app->hardwareFilter;
-            ApplyHardwareAudioFilter(app);
-            MrSetGadgetAttr(app->filterGad,app->win,GA_Text,(ULONG)(app->hardwareFilter ? "FLT*" : "FLT"));
-            skin_player_notice(gSkinPlayer,app->hardwareFilter ? "AUDIO FILTER ON" : "AUDIO FILTER OFF");
-            break;
+        case SKIN_FILTER: MrSkinToggleFilter(app); break;
         case SKIN_INFO: MrSkinInfo(app); break;
         case SKIN_STREAM: MrSkinStream(app); break;
         case SKIN_SEEK_STEP:
@@ -265,5 +442,7 @@ static void MrSkinUpdate(MrApp *app,int tick)
     snprintf(state.debug_text,sizeof(state.debug_text),"BUF %luMS SPARE %ldMS UNDERRUN %lu",gGuiPlaybackStatus.halfBufferMs,gGuiPlaybackStatus.spareMs,gGuiPlaybackStatus.underruns);
     skin_player_update(gSkinPlayer,&state,tick);
     MrSkinPlaylistUpdate(app);
-    skin_player_artwork(gSkinPlayer,app->artRGBBuf,app->artEnabled && app->artValid,0,MrIsRadioInput(app->inputName));
+    skin_player_artwork_enabled(gSkinPlayer,app->artEnabled);
+    skin_player_artwork(gSkinPlayer,MrSkinArtwork(app),app->artEnabled && app->artValid,0,MrIsRadioInput(app->inputName));
+    if (skin_player_settings_visible(gSkinPlayer)) MrSkinSettingsRows(app);
 }

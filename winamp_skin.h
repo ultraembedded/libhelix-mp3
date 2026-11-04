@@ -44,7 +44,9 @@ enum SkinAction {
     SKIN_TRACK_MOVE, SKIN_TRACK_REMOVE, SKIN_ABOUT, SKIN_INTERFACE, SKIN_PLAYLIST_SHADE,
     /* 2.0: Classic/skin switching and parity with the classic window. */
     SKIN_CLASSIC, SKIN_FILTER, SKIN_INFO, SKIN_STREAM, SKIN_SEEK_STEP,
-    SKIN_ICONIFY, SKIN_ART
+    SKIN_ICONIFY, SKIN_ART,
+    /* Skinned settings window: value = frontend row id, target = +1/-1. */
+    SKIN_SETTING_CHANGE
 };
 typedef struct SkinState {
     char title[256],debug_text[80];

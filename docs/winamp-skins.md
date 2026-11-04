@@ -66,9 +66,11 @@ first by default. To use the classic MintAMP window instead:
 - **Classic → Skin:** untick *Project ▸ Classic interface* in the classic
   window. The skin reopens with its saved skin, size, positions, playlist,
   EQ and artwork windows, and the classic window hides.
-- The skinned *Settings...* item still shows the same classic window as a
-  settings window; ticking *Classic interface* there keeps it open as the
-  main interface.
+- *Settings* (T) opens a skinned **settings window**, not the classic
+  player. It holds only the saved settings (see [Settings window](#settings-window));
+  its last row, *Classic mode: Switch now*, is a second way to the classic
+  interface. Only a skin without PLEDIT.BMP, or a screen too small for even
+  four rows, falls back to the classic window as a settings window.
 
 Playback, the playlist, the radio browser and native playlist windows carry
 on across a switch. Pending pause is released when moving to Classic, which
@@ -148,7 +150,7 @@ immediately. A forced exit can lose the latest disk preferences.
 | Menu Classic interface | Switch live to the classic MintAMP window (see above) |
 | EQ / E | Toggle the skinned equaliser |
 | PL / P | Toggle the compact playlist, with native fallback |
-| T / menu Settings | Existing native settings and utility window |
+| T / menu Settings | Toggle the skinned settings window (classic window only as a fallback) |
 | R / menu Internet Radio | Existing browser, favourites and network options |
 | Menu About | Existing frontend version and decoder credits requester |
 | Visualisation area / menu | Cycle off, spectrum and oscilloscope |
@@ -245,6 +247,32 @@ EQ_EX.BMP supplies shaded EQ artwork, with a labelled fallback when absent.
 Sprite-based resizing and miniature shade sliders are not implemented. Missing artwork, insufficient memory or a small
 screen uses the native playlist. Native settings/favourites remain accessible.
 
+## Settings window
+
+The skin edition's settings live in their own skinned window: the
+PLEDIT.BMP title, side and scrollbar sprites with PLEDIT.TXT colours and
+ROM Topaz rows, like the playlist. It docks and snaps with the other skin
+windows (Ctrl-drag detaches), has the same right-button menus, and closes
+with its close button, Escape or T. It opens beside the main window and
+remembers its place for the rest of the session.
+
+| Section | Rows |
+| --- | --- |
+| Playback | Speed mode, quality, subbands, output rate, channels, fake-stereo width/delay, buffer, decode first, Fast RAM preload, audio filter, HTTPS wait |
+| Artwork | Artwork on/off, colour artwork, artwork cache, clear cache |
+| Interface | Skin (load another), double size, next-launch preferences, Classic mode (switch now) |
+
+Click a row (or Return/Space, Right) for the next value; Shift-click (or
+Left) for the previous one. Up/Down move between rows, the scrollbar or
+cursor keys scroll when the screen shows fewer than 19 rows (double size
+on a 256-line screen). Values use exactly the classic window's handlers:
+the same limits, status messages and saved ENV/ENVARC variables, so a
+later switch to Classic shows the same choices. Decoder settings (speed,
+quality, subbands, rate, channels, fake stereo on/off, buffer, Fast RAM) are
+refused with a notice while a track plays, as the GadTools classic window
+does; they apply to the next playback. Star ratings, artwork refresh/reload,
+bench mode and the progress bar remain classic-window features.
+
 ## Equaliser
 
 EQMAIN.BMP supplies a separate 275x116 window, on/off, preamp, ten sliders and
@@ -315,7 +343,9 @@ station without a usable logo `RADIO / NO LOGO`, and a decode in progress
 `LOADING` (GadTools). The frontend's 64x64 RGB buffer is only hashed while
 the window is open, at the GUI tick rate; pens come from the skin's shared
 pen cache and are released with the skin. Artwork/colour artwork options and
-cache controls remain in the classic window's Playback menu.
+cache controls are rows in the skinned settings window. With artwork
+switched off the window shows `ART OFF` and points to Settings (T).
+Double-click the artwork for the file/stream information.
 
 ## Windows and persistence
 
