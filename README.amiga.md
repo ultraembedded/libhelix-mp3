@@ -501,7 +501,11 @@ for the selected output format.  For example, `RAM:` with `song.mp3` writes
   middle-eight-tap reduced dewindow used at 22050/11025 Hz replaces the full
   16-tap filter (`PolyphaseMono/StereoFastLowrateStride3Reduced`). `make -f
   Makefile.amiga fdct32-lowbands-test polyphase-stride3-reduced-test` checks
-  them on the host.
+  them on the host. The same 68060 hardware multiply also replaces libgcc
+  `___muldi3` calls in the shared `MULSHIFT32` (IMDCT, anti-alias, stereo)
+  and dequantisation; `mp3-decode-hash-test` decodes a 44.1 kHz stereo fixture
+  at full rate and every low rate and requires byte-identical PCM with and
+  without it.
 - `--rate 14700` (stride 3) is a middle ground between 11025 Hz (stride 4)
   and 22050 Hz (stride 2). It has its own hand-unrolled C polyphase kernel
   (`PolyphaseMonoFastLowrateStride3`/`PolyphaseStereoFastLowrateStride3` in

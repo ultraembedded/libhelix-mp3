@@ -192,7 +192,12 @@ int pow2frac[8] = {
 
 static __inline int DequantBlock_MULSHIFT32_C_REFERENCE(int x, int y)
 {
+#if defined(AMIGA_M68K) && defined(AMIGA_M68K_POLYPHASE_68060)
+	/* Same value without a ___muldi3 call per dequantised line on the 060. */
+	return MULSHIFT32_68060(x, y);
+#else
 	return (int)(((long long)x * (long long)y) >> 32);
+#endif
 }
 
 int DequantBlock_C_REFERENCE(int *inbuf, int *outbuf, int num, int scale)
