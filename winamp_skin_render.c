@@ -290,6 +290,47 @@ void skin_playlist_render(const WinampSkin *skin,const SkinPlaylistState *s,
     }
 }
 
+/* MB.BMP layout: title pieces at y 0 (active) / 21 (inactive): left
+ * corner 0, title 26, filler 127, right corner with close 153 (25/100/
+ * 25/25 wide, 20 high). Sides at y 42: left 127 (11 wide), right 139 (8),
+ * pressed close 148. Bottom at y 81, 38 high: right piece 0 (125 wide,
+ * text box), filler 127; the plain left 9 columns of the y 42 bottom-left
+ * piece cap the bar without its browser buttons. */
+int skin_art_hit_test(int art,int x,int y)
+{
+    if (x<0 || x>=SKIN_ART_FRAME_W || y<0 || y>=SKIN_ART_HEIGHT(art)) return SKIN_NONE;
+    if (inside(x,y,139,3,9,9)) return SKIN_PLAYLIST_CLOSE;
+    return SKIN_DRAG;
+}
+static void art_column(const WinampSkin *skin,SkinBlit blit,void *ctx,int sx,int w,int x,int bottom)
+{
+    int y;
+    for (y=20;y<bottom;y+=29) sprite(skin,blit,ctx,SKIN_MB,sx,42,w,bottom-y<29 ? bottom-y : 29,x,y);
+}
+void skin_art_render(const WinampSkin *skin,const SkinArtState *s,const SkinArtState *old,
+                     SkinBlit blit,SkinFill fill,SkinLabel label,void *ctx)
+{
+    int all=old==NULL || old->art!=s->art, sy=s->active ? 0 : 21, bottom=24+s->art;
+    if (all || s->active!=old->active || s->pressed!=old->pressed) {
+        sprite(skin,blit,ctx,SKIN_MB,0,sy,25,20,0,0);
+        sprite(skin,blit,ctx,SKIN_MB,26,sy,100,20,25,0);
+        sprite(skin,blit,ctx,SKIN_MB,153,sy,25,20,125,0);
+        if (s->pressed==SKIN_PLAYLIST_CLOSE) sprite(skin,blit,ctx,SKIN_MB,148,42,9,9,139,3);
+    }
+    if (all) {
+        art_column(skin,blit,ctx,127,11,0,bottom);
+        art_column(skin,blit,ctx,139,8,142,bottom);
+        fill(ctx,skin->mb_background,11,20,131,bottom-20);
+        sprite(skin,blit,ctx,SKIN_MB,127,81,25,38,0,bottom);
+        sprite(skin,blit,ctx,SKIN_MB,0,81,125,38,25,bottom);
+        sprite(skin,blit,ctx,SKIN_MB,0,42,9,38,0,bottom);
+    }
+    if (all || strcmp(s->text,old->text)) {
+        fill(ctx,skin->mb_background,10,bottom+12,112,10);
+        label(ctx,s->text,skin->mb_text,skin->mb_background,12,bottom+13,112);
+    }
+}
+
 void skin_eq_render(const WinampSkin *skin,const SkinEqState *s,const SkinEqState *old,
                     SkinBlit blit,SkinFill fill,void *ctx)
 {

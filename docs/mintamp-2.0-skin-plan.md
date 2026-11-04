@@ -53,26 +53,25 @@ Rules that keep it understandable:
   to say `NO ART`), colour-off shows grey art in SR as in SGT, double-click
   the artwork for file/stream info. Settings is ticked in the Windows menu.
 
-## Phase 2: artwork in the skin (next)
+## Phase 2: artwork in the skin (done, please test)
 
-The artwork window works but is small and plain (64x64 in a 74x74 box,
-filled pixel runs, pens shared with the skin). Proposed, in order:
+- **MB.BMP frame.** MB.BMP is the artwork window's frame (your choice). The
+  loader reads it as an optional sheet, plus `MbBG`/`MbFG` from PLEDIT.TXT.
+  Skins without it keep the plain box.
+- **Bigger art.** 128x128 square (64 when a doubled frame does not fit),
+  smoothed 2x from the frontends' 64x64 thumbnail. The track title shows in
+  the frame's bottom text box.
+- **Cheaper drawing.** Each new image is mapped to pens once into a cached
+  bitmap; repaints and moves are one blit.
+- **MintAMP 2.0 branding.** The bundled mint-leaf skin's main title bar and
+  MB.BMP title now read "MintAMP 2.0" (the MB title used to say "Internet
+  Radio"); the settings window title reads "MINTAMP 2.0 SETTINGS".
 
-1. **Frame it with the skin.** Your mint-leaf skin ships `MB.BMP` (titled
-   "Internet Radio") and `AVS.BMP`; neither is used yet. Option A: use the
-   PLEDIT frame like the settings window (works for every classic skin).
-   Option B: use MB.BMP when present (classic Winamp mini-browser frame).
-2. **Bigger art.** The frontends decode to 64x64 (`ART_W/ART_H`, shared with
-   Classic). Add a 128x128 skin-only buffer, decoded only while the skin's
-   artwork window is open, so Classic and its cache stay unchanged.
-3. **Cheaper drawing.** Remap the image once into a cached bitmap (as skin
-   sheets are) and blit it, instead of RectFill runs on every change.
-4. Optional: show art in the main window's visualiser area (76x16 is too
-   small for a cover, so only as a "tiny art" visual mode).
-
-Question for you: should the artwork window use MB.BMP (your "Internet
-Radio" frame) or keep the playlist-style frame? Was MB.BMP meant for the
-radio browser instead?
+Still possible later: a true 128x128 decode. The 64x64 thumbnail is shared
+with the classic window and the artwork cache, and the GadTools decoder
+accumulates directly into a 64x64 grid, so a sharper image needs a second
+skin-only decode path in both frontends. Worth doing only if the smoothed
+enlargement looks too soft on real hardware.
 
 ## Phase 3: remaining parity / polish
 
@@ -105,3 +104,9 @@ On MintAMP-SR and MintAMP-SGT, with the bundled mint-leaf skin:
 7. Load a skin without PLEDIT.BMP: Settings falls back to the classic window.
 8. Dock the settings window to the player and drag the player: they move
    together; Ctrl-drag detaches. Iconify/restore reopens it.
+9. Press A: the artwork window opens in the MB.BMP frame titled "MintAMP
+   2.0", art 128x128 with the track title in the bottom box. Its close
+   button closes it; it docks with the others. At double size on a
+   256-line screen it uses the 64 square. Check colours/pens on AGA and RTG,
+   and that changing tracks updates art and title without flicker.
+10. The main window's title bar reads "MintAMP 2.0" (active and inactive).

@@ -37,7 +37,8 @@ The skin covers MintAMP's features: files, playlists, stream URLs, Internet
 radio and favourites, file/stream info, artwork window, seek and volume keys,
 audio filter, iconify, MP3 EQ, balance and spectrum (EQ/spectrum start off).
 Settings (T) opens a skinned settings window holding only the settings;
-its Classic mode row switches to the classic interface.
+its Classic mode row switches to the classic interface. Artwork (A) uses the
+skin's MB.BMP frame with 128x128 art and the track title.
 
 Launch methods:
   MintAMP-Launch  Skin first, Classic on a tick (ReAction or GadTools)

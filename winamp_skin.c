@@ -108,10 +108,10 @@ bad_rle:
 static const char * const names[SKIN_VISBAR+2] = {
     "main.bmp", "cbuttons.bmp", "titlebar.bmp", "numbers.bmp", "text.bmp",
     "volume.bmp", "balance.bmp", "posbar.bmp", "playpaus.bmp", "monoster.bmp", "shufrep.bmp",
-    "pledit.bmp", "eqmain.bmp", "eq_ex.bmp", "pledit.txt", "viscolor.txt"
+    "pledit.bmp", "eqmain.bmp", "eq_ex.bmp", "mb.bmp", "pledit.txt", "viscolor.txt"
 };
-static const unsigned min_w[SKIN_VISBAR]={275,136,302,90,155,68,47,277,27,56,46,276,275,275};
-static const unsigned min_h[SKIN_VISBAR]={116,36,29,13,12,433,433,10,9,24,73,110,315,29};
+static const unsigned min_w[SKIN_VISBAR]={275,136,302,90,155,68,47,277,27,56,46,276,275,275,178};
+static const unsigned min_h[SKIN_VISBAR]={116,36,29,13,12,433,433,10,9,24,73,110,315,29,119};
 
 static int asset_id(const unsigned char *name, unsigned len)
 {
@@ -158,6 +158,8 @@ static void playlist_colors(WinampSkin *skin,const unsigned char *data,size_t si
         else if (!strcmp(key,"current")) skin->playlist_current=rgb;
         else if (!strcmp(key,"normalbg")) skin->playlist_background=rgb;
         else if (!strcmp(key,"selectedbg")) skin->playlist_selected=rgb;
+        else if (!strcmp(key,"mbbg")) skin->mb_background=rgb;
+        else if (!strcmp(key,"mbfg")) skin->mb_text=rgb;
     }
 }
 
@@ -191,6 +193,7 @@ int skin_load_memory(WinampSkin *skin, const unsigned char *z, size_t size,
     memset(&tmp,0,sizeof(tmp));
     tmp.playlist_normal=0x00ff00; tmp.playlist_current=0xffffff;
     tmp.playlist_selected=0x0000c6;
+    tmp.mb_background=0x000000; tmp.mb_text=0x00d000;
     for (i=0;i<16;++i) tmp.visual_colors[i+2]=((unsigned)(i*12)<<16)|((unsigned)(255-i*8)<<8);
     for (i=18;i<23;++i) tmp.visual_colors[i]=0x00cc00;
     tmp.visual_colors[23]=0xffffff;
@@ -255,7 +258,11 @@ int skin_load_memory(WinampSkin *skin, const unsigned char *z, size_t size,
         if (total_rgb>SKIN_MAX_TOTAL) {
             fail(error,en,"Skin bitmaps exceed the total memory limit"); goto failed;
         }
-        if (tmp.assets[id].width<min_w[id] || tmp.assets[id].height<min_h[id]) {
+        if (id==SKIN_MB && (tmp.assets[id].width<min_w[id] || tmp.assets[id].height<min_h[id])) {
+            /* Rarely used by classic skins: an odd sheet only loses the frame. */
+            total_rgb-=(unsigned long)tmp.assets[id].width*tmp.assets[id].height*3;
+            free(tmp.assets[id].rgb); memset(&tmp.assets[id],0,sizeof(tmp.assets[id]));
+        } else if (tmp.assets[id].width<min_w[id] || tmp.assets[id].height<min_h[id]) {
             if (error && en) snprintf(error,en,"Skin bitmap too small: %s",names[id]);
             goto failed;
         }

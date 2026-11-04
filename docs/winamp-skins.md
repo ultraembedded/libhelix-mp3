@@ -335,14 +335,26 @@ tests alone. Native editions do not compile these new audio hooks.
 
 ## Artwork window
 
-Album art and radio station logos decoded by the frontend appear in a 74x74
-(148x148 doubled) borderless window framed with the playlist's PLEDIT.TXT
-colours. It docks and snaps with the main, playlist and EQ windows, drags from
-anywhere, and has the same right-button menus. Missing art shows `NO ART`, a
+Album art and radio station logos decoded by the frontend appear in their
+own window. A skin with **MB.BMP** (the classic mini-browser sheet) frames it
+with that artwork: title bar, sides, close button and the bottom bar, whose
+text box shows the track title in PLEDIT.TXT `MbBG`/`MbFG` colours (black and
+green by default). The window is 150 pixels wide with a 128x128 art square,
+or 64x64 when the doubled 190-pixel frame would not fit the screen. Skins
+without MB.BMP keep the plain 74x74 box in the playlist colours. An
+undersized MB.BMP (under 178x119) is ignored rather than failing the skin.
+
+The frontends still decode a 64x64 RGB thumbnail (shared with the classic
+window and the artwork cache); the 128 square is a 2x enlargement smoothed by
+integer averaging, not a higher-resolution decode. Each new image is mapped
+to pens once into a cached bitmap and then only blitted, so refreshes and
+window moves cost one blit. The window docks and snaps with the main,
+playlist, EQ and settings windows, drags from anywhere except the close
+button, and has the same right-button menus. Missing art shows `NO ART`, a
 station without a usable logo `RADIO / NO LOGO`, and a decode in progress
-`LOADING` (GadTools). The frontend's 64x64 RGB buffer is only hashed while
-the window is open, at the GUI tick rate; pens come from the skin's shared
-pen cache and are released with the skin. Artwork/colour artwork options and
+`LOADING` (GadTools). The thumbnail is only hashed while the window is open,
+at the GUI tick rate; pens come from the skin's shared pen cache and are
+released with the skin. Artwork/colour artwork options and
 cache controls are rows in the skinned settings window. With artwork
 switched off the window shows `ART OFF` and points to Settings (T).
 Double-click the artwork for the file/stream information.
@@ -369,7 +381,8 @@ paths, bounded ZIP/CRC checks. BMP: 1/4/8-bit palette, 24/32-bit RGB, RLE4/RLE8
 and uncompressed top-down. MAIN.BMP, CBUTTONS.BMP and TEXT.BMP are required.
 Missing optional player artwork uses background/font/neutral fallback controls;
 malformed or undersized supplied sheets are rejected. Optional PLEDIT.BMP is
-at least 276x110; EQMAIN.BMP at least 275x315. Failed replacements retain the
+at least 276x110; EQMAIN.BMP at least 275x315; MB.BMP (artwork frame) at
+least 178x119, otherwise only the frame falls back. Failed replacements retain the
 current resources. No files are extracted to disk.
 
 V39+ uses obtained shared pens with disposal; V37/V38 uses the desktop palette.

@@ -12,6 +12,8 @@ static void blit(void *ctx,int id,int sx,int sy,int w,int h,int x,int y)
 }
 static void fill(void *ctx,unsigned rgb,int x,int y,int w,int h)
 { (void)ctx;(void)rgb; assert(x>=0 && y>=0 && x+w<=275 && y+h<=232); }
+static void label(void *ctx,const char *text,unsigned rgb,unsigned bg,int x,int y,int width)
+{ (void)ctx;(void)text;(void)rgb;(void)bg; assert(x>=0 && y>=0 && x+width<=275 && y+8<=232); }
 static int has(int id,int sx,int sy,int w,int h,int x,int y)
 {
     int i; for (i=0;i<count;++i) { Call *c=&calls[i];
@@ -41,5 +43,24 @@ int main(void)
     count=0; eq.shaded=1; eq.pressed=0; skin_eq_render(&skin,&eq,NULL,blit,fill,NULL);
     assert(has(SKIN_EQ_EX,0,0,275,14,0,0));
     assert(skin_hit_test(39,32)==SKIN_TIMER && skin_playlist_hit_test(254,4)==SKIN_PLAYLIST_SHADE);
-    puts("Classic sprite geometry: timer sign, transport widths, titlebars, mono/stereo, EQ controls and shade passed"); return 0;
+    { /* MB.BMP artwork frame: real 242x119 sheet, every blit inside it and the window. */
+      SkinArtState a; int art,j;
+      skin.assets[SKIN_MB].width=242; skin.assets[SKIN_MB].height=119;
+      for (art=64;art<=128;art+=64) {
+        memset(&a,0,sizeof(a)); a.art=art; a.active=1; a.pressed=SKIN_PLAYLIST_CLOSE; strcpy(a.text,"Artist - Title");
+        count=0; skin_art_render(&skin,&a,NULL,blit,fill,label,NULL);
+        for (j=0;j<count;++j) { Call *c=&calls[j];
+            assert(c->id==SKIN_MB && c->sx+c->w<=242 && c->sy+c->h<=119);
+            assert(c->x>=0 && c->y>=0 && c->x+c->w<=SKIN_ART_FRAME_W && c->y+c->h<=SKIN_ART_HEIGHT(art));
+        }
+        assert(has(SKIN_MB,0,0,25,20,0,0) && has(SKIN_MB,26,0,100,20,25,0) && has(SKIN_MB,153,0,25,20,125,0));
+        assert(has(SKIN_MB,148,42,9,9,139,3) && has(SKIN_MB,0,81,125,38,25,24+art) && has(SKIN_MB,127,81,25,38,0,24+art));
+        assert(SKIN_ART_X(art)>=11 && SKIN_ART_X(art)+art<=142);
+        a.active=0; a.pressed=0; count=0; skin_art_render(&skin,&a,NULL,blit,fill,label,NULL);
+        assert(has(SKIN_MB,26,21,100,20,25,0));
+      }
+      assert(skin_art_hit_test(128,140,4)==SKIN_PLAYLIST_CLOSE && skin_art_hit_test(128,60,60)==SKIN_DRAG);
+      assert(skin_art_hit_test(128,150,4)==SKIN_NONE && skin_art_hit_test(64,10,SKIN_ART_HEIGHT(64))==SKIN_NONE);
+    }
+    puts("Classic sprite geometry: timer sign, transport widths, titlebars, mono/stereo, EQ controls, shade and MB artwork frame passed"); return 0;
 }

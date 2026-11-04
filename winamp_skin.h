@@ -12,7 +12,9 @@
 enum SkinAssetId {
     SKIN_MAIN, SKIN_BUTTONS, SKIN_TITLEBAR, SKIN_NUMBERS, SKIN_TEXT,
     SKIN_VOLUME, SKIN_BALANCE, SKIN_POSITION, SKIN_PLAYPAUS,
-    SKIN_MONOSTER, SKIN_SHUFREP, SKIN_PLEDIT, SKIN_EQMAIN, SKIN_EQ_EX, SKIN_VISBAR, SKIN_ASSET_COUNT
+    SKIN_MONOSTER, SKIN_SHUFREP, SKIN_PLEDIT, SKIN_EQMAIN, SKIN_EQ_EX,
+    SKIN_MB, /* optional mini-browser frame, used for the artwork window */
+    SKIN_VISBAR, SKIN_ASSET_COUNT
 };
 typedef struct SkinBitmap {
     unsigned width, height;
@@ -22,6 +24,7 @@ typedef struct WinampSkin {
     SkinBitmap assets[SKIN_ASSET_COUNT];
     unsigned visual_colors[24];
     unsigned playlist_normal, playlist_current, playlist_background, playlist_selected;
+    unsigned mb_background, mb_text; /* PLEDIT.TXT MbBG/MbFG */
 } WinampSkin;
 
 /* Destination must be zero-initialised. Failure leaves it unchanged. */
@@ -77,6 +80,22 @@ int skin_playlist_hit_test(int x, int y);
 void skin_playlist_render(const WinampSkin *skin, const SkinPlaylistState *now,
                           const SkinPlaylistState *old, SkinBlit blit,
                           SkinFill fill, SkinLabel label, void *ctx);
+
+/* Artwork window framed by MB.BMP (the classic mini-browser sheet): a
+ * 150-pixel-wide frame, 20-pixel title, art body and 38-pixel bottom bar
+ * whose text box shows a line of text. The caller paints the art square
+ * at (SKIN_ART_X(art), SKIN_ART_Y) after the frame. */
+#define SKIN_ART_FRAME_W 150
+#define SKIN_ART_Y 22
+#define SKIN_ART_X(art) (11+(131-(art))/2)
+#define SKIN_ART_HEIGHT(art) (20+(art)+4+38)
+typedef struct SkinArtState {
+    int art, active, pressed; /* art: square size, 64..128 */
+    char text[32];
+} SkinArtState;
+int skin_art_hit_test(int art,int x,int y);
+void skin_art_render(const WinampSkin *skin,const SkinArtState *now,const SkinArtState *old,
+                     SkinBlit blit,SkinFill fill,SkinLabel label,void *ctx);
 
 typedef struct SkinEqState {
     int enabled, preamp, bands[10], pressed, shaded, active;

@@ -64,8 +64,8 @@ int main(int argc,char **argv)
         skin_free(&skin); return 0;
     }
     if (argc>2 && !strcmp(argv[1],"--colours")) {
-        printf("%06x %06x %06x %06x\n",skin.playlist_normal,skin.playlist_current,
-               skin.playlist_background,skin.playlist_selected);
+        printf("%06x %06x %06x %06x %06x %06x\n",skin.playlist_normal,skin.playlist_current,
+               skin.playlist_background,skin.playlist_selected,skin.mb_background,skin.mb_text);
         {
         Canvas *c=calloc(1,sizeof(*c)); SkinEqState state={0},old;
         unsigned char *full=malloc(sizeof(c->pixels)); unsigned draws;
