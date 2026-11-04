@@ -128,6 +128,12 @@ struct SkinPlayer {
     unsigned char peak_hold[16];
     int saved_left,saved_top,restore_playlist,restore_eq;
     unsigned drag_group;
+    /* Coalesced group drag: expected window positions and the not yet
+     * applied pointer delta. Moves wait until Intuition has applied the
+     * previous ones, so a fast drag cannot queue a backlog of layer work. */
+    int drag_pdx,drag_pdy,drag_root,drag_waits;
+    WORD drag_wx[SKIN_WINDOW_MAX],drag_wy[SKIN_WINDOW_MAX];
+    int slider_pending,slider_action,slider_value;
     unsigned long playlist_identity;
     int preserve_selection;
     int have_drawn, pressed, drag_x, drag_y,seek_preview;
@@ -296,40 +302,118 @@ static void fill(void *ctx,unsigned rgb,int x,int y,int w,int h)
     RectFill(p->target->RPort,x*s,y*s,(x+w)*s-1,(y+h)*s-1);
 }
 #define SKIN_WINDOWS SKIN_WINDOW_MAX
+static void window_list(SkinPlayer *p,struct Window **windows)
+{ windows[0]=p->win; windows[1]=p->plwin; windows[2]=p->eqwin; windows[3]=p->artwin; windows[4]=p->setwin; }
+/* During a drag, members of the group report where they are going to be. */
 static void window_rects(SkinPlayer *p,SkinRect *r,struct Window **windows)
 {
     int i;
-    windows[0]=p->win; windows[1]=p->plwin; windows[2]=p->eqwin; windows[3]=p->artwin; windows[4]=p->setwin;
+    window_list(p,windows);
     memset(r,0,SKIN_WINDOWS*sizeof(*r));
     for (i=0;i<SKIN_WINDOWS;++i) if (windows[i]) {
-        r[i].x=windows[i]->LeftEdge; r[i].y=windows[i]->TopEdge;
+        int moving=(p->drag_group&(1U<<i))!=0;
+        r[i].x=moving ? p->drag_wx[i] : windows[i]->LeftEdge; r[i].y=moving ? p->drag_wy[i] : windows[i]->TopEdge;
         r[i].w=windows[i]->Width; r[i].h=windows[i]->Height;
     }
 }
+/* Mouse movement is reported only while a button is held. Hovering over a
+ * skin window then wakes neither the GUI nor, through it, the decoder's
+ * share of the CPU. */
+static void track_mouse(SkinPlayer *p,struct Window *w,ULONG type,UWORD code);
+static void drag_ticks(SkinPlayer *p,int on)
+{
+    struct Window *windows[SKIN_WINDOWS]; struct Window *w;
+    window_list(p,windows); w=p->drag_root>=0 && p->drag_root<SKIN_WINDOWS ? windows[p->drag_root] : NULL;
+    if (!w) return;
+    /* IntuiTicks flush a held-back move once the pointer stops. */
+    if (on) ModifyIDCMP(w,w->IDCMPFlags|IDCMP_INTUITICKS);
+    else if (w->IDCMPFlags&IDCMP_INTUITICKS) ModifyIDCMP(w,w->IDCMPFlags&~IDCMP_INTUITICKS);
+}
 static void drag_begin(SkinPlayer *p,int root,UWORD qualifier)
 {
-    SkinRect r[SKIN_WINDOWS]; struct Window *windows[SKIN_WINDOWS];
-    window_rects(p,r,windows);
-    p->drag_group=(qualifier&IEQUALIFIER_CONTROL) ? 1U<<root : skin_window_group(r,SKIN_WINDOWS,root,2*p->resources->scale);
-}
-static void drag_move(SkinPlayer *p,int dx,int dy)
-{
     SkinRect r[SKIN_WINDOWS]; struct Window *windows[SKIN_WINDOWS]; int i;
+    p->drag_group=0; window_rects(p,r,windows);
+    /* As in Winamp: the main window carries the windows docked to it;
+     * dragging any other window (or Ctrl-dragging the main one) moves only
+     * that window, which then snaps or undocks where it is dropped. */
+    p->drag_group=(root!=0 || (qualifier&IEQUALIFIER_CONTROL)) ? 1U<<root :
+        skin_window_group(r,SKIN_WINDOWS,root,2*p->resources->scale);
+    for (i=0;i<SKIN_WINDOWS;++i) { p->drag_wx[i]=(WORD)r[i].x; p->drag_wy[i]=(WORD)r[i].y; }
+    p->drag_pdx=p->drag_pdy=0; p->drag_root=root; p->drag_waits=0;
+    if (p->drag_group) drag_ticks(p,1);
+}
+static int drag_landed(SkinPlayer *p)
+{
+    struct Window *windows[SKIN_WINDOWS]; int i;
+    window_list(p,windows);
+    for (i=0;i<SKIN_WINDOWS;++i) if ((p->drag_group&(1U<<i)) && windows[i] &&
+        (windows[i]->LeftEdge!=p->drag_wx[i] || windows[i]->TopEdge!=p->drag_wy[i])) return 0;
+    return 1;
+}
+static void drag_apply(SkinPlayer *p,int force)
+{
+    SkinRect r[SKIN_WINDOWS]; struct Window *windows[SKIN_WINDOWS];
+    int i,j,dx=p->drag_pdx,dy=p->drag_pdy,done[SKIN_WINDOWS];
+    if (!p->drag_group || (!dx && !dy)) return;
+    if (!force && !drag_landed(p)) {
+        /* Normally the next IntuiTick finds the move done. If a window
+         * stays elsewhere (another program moved it), trust where it is. */
+        if (++p->drag_waits<8) return;
+        window_list(p,windows);
+        for (i=0;i<SKIN_WINDOWS;++i) if (windows[i]) { p->drag_wx[i]=windows[i]->LeftEdge; p->drag_wy[i]=windows[i]->TopEdge; }
+    }
+    p->drag_waits=0;
     window_rects(p,r,windows);
-    for (i=0;i<SKIN_WINDOWS;++i) if (p->drag_group&(1U<<i)) {
+    for (i=0;i<SKIN_WINDOWS;++i) if ((p->drag_group&(1U<<i)) && windows[i]) {
         if (r[i].x+dx<0) dx=-r[i].x;
         if (r[i].y+dy<0) dy=-r[i].y;
         if (r[i].x+r[i].w+dx>p->screen->Width) dx=p->screen->Width-r[i].x-r[i].w;
         if (r[i].y+r[i].h+dy>p->screen->Height) dy=p->screen->Height-r[i].y-r[i].h;
     }
-    for (i=0;i<SKIN_WINDOWS;++i) if ((p->drag_group&(1U<<i)) && windows[i]) MoveWindow(windows[i],dx,dy);
+    p->drag_pdx=p->drag_pdy=0;
+    if (!dx && !dy) return;
+    /* Move the leading window first so docked windows never cover each
+     * other on the way; with smart refresh nothing then needs repainting. */
+    for (i=0;i<SKIN_WINDOWS;++i) done[i]=!((p->drag_group&(1U<<i)) && windows[i]);
+    for (;;) {
+        int best=-1; long score=0;
+        for (j=0;j<SKIN_WINDOWS;++j) if (!done[j]) {
+            long v=(long)r[j].x*(dx>0 ? 1 : dx<0 ? -1 : 0)+(long)r[j].y*(dy>0 ? 1 : dy<0 ? -1 : 0);
+            if (best<0 || v>score) { best=j; score=v; }
+        }
+        if (best<0) break;
+        done[best]=1; MoveWindow(windows[best],dx,dy);
+        p->drag_wx[best]=(WORD)(r[best].x+dx); p->drag_wy[best]=(WORD)(r[best].y+dy);
+    }
+}
+static void drag_move(SkinPlayer *p,int dx,int dy)
+{
+    if (!p->drag_group) return;
+    p->drag_pdx+=dx; p->drag_pdy+=dy; drag_apply(p,0);
 }
 static void drag_end(SkinPlayer *p,int root)
 {
     SkinRect r[SKIN_WINDOWS]; struct Window *windows[SKIN_WINDOWS]; int dx,dy;
+    if (!p->drag_group) return;
+    drag_apply(p,1);
     window_rects(p,r,windows);
     skin_window_snap(r,SKIN_WINDOWS,root,p->drag_group,8*p->resources->scale,&dx,&dy);
-    drag_move(p,dx,dy); p->drag_group=0;
+    p->drag_pdx=dx; p->drag_pdy=dy; drag_apply(p,1);
+    drag_ticks(p,0); p->drag_group=0;
+}
+/* Focus lost mid-drag: finish where the pointer was, without snapping. */
+static void drag_cancel(SkinPlayer *p)
+{
+    if (!p->drag_group) return;
+    drag_apply(p,1); drag_ticks(p,0); p->drag_group=0;
+}
+static void track_mouse(SkinPlayer *p,struct Window *w,ULONG type,UWORD code)
+{
+    if (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN) ReportMouse(TRUE,w);
+    else if ((type==IDCMP_MOUSEBUTTONS && code==SELECTUP) || type==IDCMP_INACTIVEWINDOW) {
+        ReportMouse(FALSE,w);
+        if (type==IDCMP_INACTIVEWINDOW) drag_cancel(p);
+    }
 }
 static void repaint(SkinPlayer *p,int all)
 {
@@ -444,7 +528,7 @@ static int playlist_open(SkinPlayer *p)
         WA_Borderless,TRUE,WA_Activate,TRUE,WA_RMBTrap,FALSE,
         WA_DetailPen,p->win->DetailPen,WA_BlockPen,p->win->BlockPen,
         WA_NewLookMenus,(ULONG)(GfxBase->LibNode.lib_Version>=39),
-        WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_ReportMouse,FALSE,WA_SmartRefresh,TRUE,
         WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|
                    IDCMP_MENUPICK|IDCMP_VANILLAKEY|IDCMP_RAWKEY|IDCMP_INACTIVEWINDOW|IDCMP_ACTIVEWINDOW,TAG_DONE);
     if (!p->plwin) return 0;
@@ -615,7 +699,7 @@ static int open_window(SkinPlayer *p,WORD left,WORD top)
         WA_Borderless,TRUE,WA_Activate,TRUE,WA_RMBTrap,FALSE,
         WA_DetailPen,(ULONG)text_pen,WA_BlockPen,(ULONG)background_pen,
         WA_NewLookMenus,(ULONG)(GfxBase->LibNode.lib_Version>=39),
-        WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_ReportMouse,FALSE,WA_SmartRefresh,TRUE,
         WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|
                    IDCMP_MENUPICK|IDCMP_VANILLAKEY|IDCMP_RAWKEY|IDCMP_INACTIVEWINDOW|IDCMP_ACTIVEWINDOW,
         TAG_DONE);
@@ -671,7 +755,7 @@ static void restore_state(SkinPlayer *p)
     p->pl_left=(int)v[3]; p->pl_top=(int)v[4]; p->eq_left=(int)v[5]; p->eq_top=(int)v[6];
     p->pl_position=p->eq_position=1; p->sequence.order.shuffle=(int)v[7]; p->sequence.order.repeat=(int)v[8];
     gSkinAudio.balance=(int)v[9]; p->remaining=v[10]!=0; p->shaded=v[11]!=0;
-    p->visual_mode=(int)v[12]; p->visual_interval=(int)v[13]; p->debug=v[14]!=0;
+    p->visual_mode=(int)v[12]; p->visual_interval=(int)v[13]; p->debug=0; /* former title overlay; the song title always stays */
     gSkinAudio.eq_enabled=v[15]!=0; gSkinAudio.eq_preamp=(int)v[16];
     for (i=0;i<10;++i) gSkinAudio.eq_bands[i]=(int)v[17+i];
     /* Version 2 adds visibility/positions, 3 shade states, 4 artwork. */
@@ -731,7 +815,7 @@ static void eq_toggle(SkinPlayer *p)
     if (top+height*scale>p->screen->Height) top=p->screen->Height-height*scale;
     p->eqwin=OpenWindowTags(NULL,WA_CustomScreen,(ULONG)p->screen,WA_Left,left,WA_Top,top,
         WA_Width,275*scale,WA_Height,height*scale,WA_Borderless,TRUE,WA_Activate,TRUE,
-        WA_RMBTrap,TRUE,WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_RMBTrap,TRUE,WA_ReportMouse,FALSE,WA_SmartRefresh,TRUE,
         WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|IDCMP_VANILLAKEY|IDCMP_INACTIVEWINDOW|IDCMP_ACTIVEWINDOW,TAG_DONE);
     if (!p->eqwin) { skin_player_notice(p,"COULD NOT OPEN EQUALISER"); return; }
     eq_repaint(p,1); repaint(p,0); menu_sync(p);
@@ -873,7 +957,7 @@ static int art_open(SkinPlayer *p)
         WA_Width,width,WA_Height,height,WA_Borderless,TRUE,WA_Activate,FALSE,WA_RMBTrap,FALSE,
         WA_DetailPen,p->win->DetailPen,WA_BlockPen,p->win->BlockPen,
         WA_NewLookMenus,(ULONG)(GfxBase->LibNode.lib_Version>=39),
-        WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_ReportMouse,FALSE,WA_SmartRefresh,TRUE,
         WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|IDCMP_MENUPICK|IDCMP_VANILLAKEY|
                    IDCMP_ACTIVEWINDOW|IDCMP_INACTIVEWINDOW,TAG_DONE);
     if (!p->artwin) return 0;
@@ -894,7 +978,8 @@ void skin_player_artwork(SkinPlayer *p,const unsigned char *rgb,int valid,int lo
     /* Hash only while visible: a hidden artwork window costs nothing. */
     if (!p->artwin) { p->art_kind=-1; return; }
     if (kind==SKIN_ART_IMAGE) {
-        for (i=0;i<sizeof(p->art_rgb);++i) hash=((hash^rgb[i])*16777619UL)&0xffffffffUL;
+        /* Sampled: called on GUI updates, so keep it to ~1.8K bytes. */
+        for (i=0;i<sizeof(p->art_rgb);i+=7) hash=((hash^rgb[i])*16777619UL)&0xffffffffUL;
         if (kind==p->art_kind && hash==p->art_hash) return;
         memcpy(p->art_rgb,rgb,sizeof(p->art_rgb)); p->art_hash=hash; p->art_cached=0;
     } else if (kind==p->art_kind) return;
@@ -916,7 +1001,7 @@ static int art_poll(SkinPlayer *p,SkinEvent *event)
         int x=m->MouseX/p->resources->scale,y=m->MouseY/p->resources->scale;
         int sx=p->screen->MouseX,sy=p->screen->MouseY;
         int close=p->art_mb && skin_art_hit_test(p->art_size,x,y)==SKIN_PLAYLIST_CLOSE;
-        ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event));
+        ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event)); track_mouse(p,p->artwin,type,code);
         if (type==IDCMP_REFRESHWINDOW) { BeginRefresh(p->artwin); art_repaint(p,1); EndRefresh(p->artwin,TRUE); }
         else if (type==IDCMP_ACTIVEWINDOW || type==IDCMP_INACTIVEWINDOW) {
             if (p->art_dragging) { p->art_dragging=0; drag_end(p,3); }
@@ -1099,7 +1184,7 @@ static int settings_open(SkinPlayer *p)
         WA_Borderless,TRUE,WA_Activate,TRUE,WA_RMBTrap,FALSE,
         WA_DetailPen,p->win->DetailPen,WA_BlockPen,p->win->BlockPen,
         WA_NewLookMenus,(ULONG)(GfxBase->LibNode.lib_Version>=39),
-        WA_ReportMouse,TRUE,WA_SimpleRefresh,TRUE,
+        WA_ReportMouse,FALSE,WA_SmartRefresh,TRUE,
         WA_IDCMP,IDCMP_MOUSEBUTTONS|IDCMP_MOUSEMOVE|IDCMP_REFRESHWINDOW|IDCMP_MENUPICK|
                    IDCMP_VANILLAKEY|IDCMP_RAWKEY|IDCMP_INACTIVEWINDOW|IDCMP_ACTIVEWINDOW,TAG_DONE);
     if (!p->setwin) return 0;
@@ -1156,7 +1241,7 @@ static int settings_poll(SkinPlayer *p,SkinEvent *event)
         int x=m->MouseX/p->resources->scale,y=m->MouseY/p->resources->scale;
         int sx=p->screen->MouseX,sy=p->screen->MouseY;
         int back=(qualifier&(IEQUALIFIER_LSHIFT|IEQUALIFIER_RSHIFT))!=0;
-        ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event));
+        ReplyMsg((struct Message *)m); memset(event,0,sizeof(*event)); track_mouse(p,p->setwin,type,code);
         if (type==IDCMP_REFRESHWINDOW) { BeginRefresh(p->setwin); settings_repaint(p,1); EndRefresh(p->setwin,TRUE); }
         else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) {
             if (p->set_pressed==SET_PRESS_DRAG) drag_end(p,4);
@@ -1340,14 +1425,25 @@ static void eq_presets(SkinPlayer *p)
         ++gSkinAudio.eq_sequence; eq_repaint(p,0); save_state(p);
     }
 }
+static void eq_drag_to(SkinPlayer *p,int y)
+{
+    int db=12-(y-43)*24/50;
+    if (!p->eqwin || p->eq_pressed<=0) return;
+    if (db<-12) db=-12;
+    if (db>12) db=12;
+    if (p->eq_pressed==1) gSkinAudio.eq_preamp=db; else gSkinAudio.eq_bands[p->eq_pressed-2]=db;
+    ++gSkinAudio.eq_sequence; eq_repaint(p,0);
+}
 static int eq_poll(SkinPlayer *p)
 {
-    struct IntuiMessage *m;
+    struct IntuiMessage *m; int pending=0,pending_y=0;
     while (p->eqwin && (m=(struct IntuiMessage *)GetMsg(p->eqwin->UserPort))!=NULL) {
         ULONG type=m->Class; UWORD code=m->Code;
         int x=m->MouseX/p->resources->scale,y=m->MouseY/p->resources->scale;
         int sx=p->screen->MouseX,sy=p->screen->MouseY,i=-1; UWORD qualifier=m->Qualifier;
-        ReplyMsg((struct Message *)m);
+        ReplyMsg((struct Message *)m); track_mouse(p,p->eqwin,type,code);
+        /* A release (or anything else) lands the held-back slider first. */
+        if (pending && type!=IDCMP_MOUSEMOVE) { eq_drag_to(p,pending_y); pending=0; }
         if (type==IDCMP_REFRESHWINDOW) { BeginRefresh(p->eqwin); eq_repaint(p,1); EndRefresh(p->eqwin,TRUE); }
         else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) { p->eq_pressed=0; eq_repaint(p,0); }
         else if (type==IDCMP_VANILLAKEY && (code==27 || code=='e' || code=='E')) { eq_close(p); save_state(p); }
@@ -1392,14 +1488,10 @@ static int eq_poll(SkinPlayer *p)
             eq_repaint(p,0); save_state(p);
         }
         if (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN) eq_repaint(p,0);
-        if ((type==IDCMP_MOUSEMOVE || (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN)) && p->eq_pressed>0) {
-            int db=12-(y-43)*24/50;
-            if (db<-12) db=-12;
-            if (db>12) db=12;
-            if (p->eq_pressed==1) gSkinAudio.eq_preamp=db; else gSkinAudio.eq_bands[p->eq_pressed-2]=db;
-            ++gSkinAudio.eq_sequence; eq_repaint(p,0);
-        }
+        /* Only the newest queued pointer position matters for a slider. */
+        if ((type==IDCMP_MOUSEMOVE || (type==IDCMP_MOUSEBUTTONS && code==SELECTDOWN)) && p->eq_pressed>0) { pending=1; pending_y=y; }
     }
+    if (pending) eq_drag_to(p,pending_y);
     return 0;
 }
 static void visual_arm(SkinPlayer *p)
@@ -1518,7 +1610,7 @@ void skin_player_debug(SkinPlayer *p,long buffer_ms,long spare_ms,unsigned long 
 {
     char text[512];
     snprintf(text,sizeof(text),"Station: %.24s\nBuffer: %ld ms\nSpare: %ld ms\nUnderruns: %lu\nRadio buffered: %lu bytes\nSource: %d ch, %d kbit/s\nPaula output: %s\nPause: %s",station,buffer_ms,spare_ms,underruns,bytes,gSkinAudio.channels,gSkinAudio.bitrate,gSkinAudio.output_stereo ? "stereo" : "mono",gSkinAudio.paused ? "paused" : gSkinAudio.pause_requested ? "pending" : "running");
-    if (skin_player_choice(p,text,"OK|Toggle overlay")==0) { p->debug=!p->debug; save_state(p); }
+    skin_player_choice(p,text,"OK");
 }
 static void change_skin(SkinPlayer *p,int choose)
 {
@@ -1715,7 +1807,6 @@ void skin_player_update(SkinPlayer *p,const SkinState *s,int tick)
         strncpy(p->art_title,s->title,sizeof(p->art_title)-1); p->art_title[sizeof(p->art_title)-1]=0;
         if (p->art_mb) art_repaint(p,0);
     }
-    if (p->debug && s->debug_text[0]) { strncpy(p->now.title,s->debug_text,255); p->now.title[255]=0; p->now.scroll=0; }
     if (p->notice_ticks) {
         strcpy(p->now.title,p->notice); p->now.scroll=0;
         if (tick && !p->visual_device) --p->notice_ticks;
@@ -1769,14 +1860,19 @@ static void playlist_scroll(SkinPlayer *p,int top)
 }
 static int playlist_poll(SkinPlayer *p,SkinEvent *event)
 {
-    struct IntuiMessage *msg;
+    struct IntuiMessage *msg; int scroll_pending=0,scroll_y=0;
     while (p->plwin && (msg=(struct IntuiMessage *)GetMsg(p->plwin->UserPort))!=NULL) {
         ULONG type=msg->Class,seconds=msg->Seconds,micros=msg->Micros;
         UWORD code=msg->Code;
         int x=msg->MouseX/p->resources->scale,y=msg->MouseY/p->resources->scale;
         int sx=p->screen->MouseX,sy=p->screen->MouseY;
         UWORD qualifier=msg->Qualifier;
-        ReplyMsg((struct Message *)msg); memset(event,0,sizeof(*event));
+        ReplyMsg((struct Message *)msg); memset(event,0,sizeof(*event)); track_mouse(p,p->plwin,type,code);
+        if (scroll_pending && type!=IDCMP_MOUSEMOVE) {
+            if (p->playlist_pressed==SKIN_PLAYLIST_SCROLL)
+                playlist_scroll(p,(scroll_y-29)*skin_playlist_top(p->playlist.count,p->playlist.count)/156);
+            scroll_pending=0;
+        }
         if (type==IDCMP_REFRESHWINDOW) {
             BeginRefresh(p->plwin); playlist_repaint(p,1); EndRefresh(p->plwin,TRUE);
         } else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) {
@@ -1844,8 +1940,7 @@ static int playlist_poll(SkinPlayer *p,SkinEvent *event)
             drag_move(p,sx-p->playlist_drag_x,sy-p->playlist_drag_y);
             p->playlist_drag_x=sx; p->playlist_drag_y=sy;
         } else if (type==IDCMP_MOUSEMOVE && p->playlist_pressed==SKIN_PLAYLIST_SCROLL) {
-            int maximum=skin_playlist_top(p->playlist.count,p->playlist.count);
-            playlist_scroll(p,(y-29)*maximum/156);
+            scroll_pending=1; scroll_y=y; /* redraw rows once, at the newest position */
         } else if (type==IDCMP_MOUSEBUTTONS && code==SELECTUP) {
             int action=p->playlist_pressed; p->playlist_pressed=0;
             if (action==SKIN_DRAG) drag_end(p,1);
@@ -1879,6 +1974,10 @@ static int playlist_poll(SkinPlayer *p,SkinEvent *event)
             }
         }
     }
+    if (scroll_pending && p->plwin && p->playlist_pressed==SKIN_PLAYLIST_SCROLL) {
+        int maximum=skin_playlist_top(p->playlist.count,p->playlist.count);
+        playlist_scroll(p,(scroll_y-29)*maximum/156);
+    }
     return 0;
 }
 int skin_player_poll(SkinPlayer *p,SkinEvent *event)
@@ -1899,6 +1998,7 @@ int skin_player_poll(SkinPlayer *p,SkinEvent *event)
     if (p->visual_pending && CheckIO((struct IORequest *)p->visual_timer)) {
         WaitIO((struct IORequest *)p->visual_timer); p->visual_pending=0; visual_tick(p); visual_arm(p);
     }
+    drag_apply(p,0);
     eq_poll(p);
     if (playlist_poll(p,event)) return 1;
     if (art_poll(p,event)) return 1;
@@ -1910,10 +2010,10 @@ int skin_player_poll(SkinPlayer *p,SkinEvent *event)
         int sx=p->screen->MouseX,sy=p->screen->MouseY;
         UWORD qualifier=msg->Qualifier;
         ReplyMsg((struct Message *)msg);
-        memset(event,0,sizeof(*event));
+        memset(event,0,sizeof(*event)); track_mouse(p,p->win,type,code);
         if (type==IDCMP_REFRESHWINDOW) {
             BeginRefresh(p->win); repaint(p,1); EndRefresh(p->win,TRUE);
-        } else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) { p->pressed=0; repaint(p,0); }
+        } else if (type==IDCMP_INACTIVEWINDOW || type==IDCMP_ACTIVEWINDOW) { p->pressed=0; p->slider_pending=0; repaint(p,0); }
         else if (type==IDCMP_MENUPICK && code!=MENUNULL) {
             if (menu_action(p,code,event)) return 1;
         } else if (type==IDCMP_VANILLAKEY) {
@@ -1936,12 +2036,11 @@ int skin_player_poll(SkinPlayer *p,SkinEvent *event)
             }
         } else if (type==IDCMP_MOUSEMOVE && p->pressed==SKIN_DRAG) {
             drag_move(p,sx-p->drag_x,sy-p->drag_y); p->drag_x=sx; p->drag_y=sy;
-        } else if (type==IDCMP_MOUSEMOVE && p->pressed==SKIN_SEEK) {
-            p->seek_preview=skin_slider_value(SKIN_SEEK,x); repaint(p,0);
-        } else if (type==IDCMP_MOUSEMOVE && (p->pressed==SKIN_VOLUME_SET || p->pressed==SKIN_BALANCE_SET)) {
-            event->action=p->pressed; event->value=skin_slider_value(p->pressed,x); return 1;
+        } else if (type==IDCMP_MOUSEMOVE && (p->pressed==SKIN_SEEK || p->pressed==SKIN_VOLUME_SET || p->pressed==SKIN_BALANCE_SET)) {
+            /* Coalesce: act once on the newest position after the queue drains. */
+            p->slider_pending=1; p->slider_action=p->pressed; p->slider_value=skin_slider_value(p->pressed,x);
         } else if (type==IDCMP_MOUSEBUTTONS && code==SELECTUP) {
-            int action=p->pressed; p->pressed=0;
+            int action=p->pressed; p->pressed=0; p->slider_pending=0;
             if (action==SKIN_DRAG) drag_end(p,0);
             repaint(p,0); save_state(p);
             if (action==SKIN_VOLUME_SET || action==SKIN_SEEK || action==SKIN_BALANCE_SET) {
@@ -1952,6 +2051,13 @@ int skin_player_poll(SkinPlayer *p,SkinEvent *event)
                 if (internal_action(p,action)) { if (!p->win) return 0; menu_sync(p); continue; }
                 event->action=action; event->released=1; return 1;
             }
+        }
+    }
+    if (p->win && p->slider_pending) {
+        p->slider_pending=0;
+        if (p->pressed==SKIN_SEEK) { p->seek_preview=p->slider_value; repaint(p,0); }
+        else if (p->pressed==p->slider_action) {
+            memset(event,0,sizeof(*event)); event->action=p->slider_action; event->value=p->slider_value; return 1;
         }
     }
     return 0;

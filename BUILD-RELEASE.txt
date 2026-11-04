@@ -1,7 +1,7 @@
 MintAMP 2.0 development build recipe (PR #521)
 =============================================
 
-Work only on codex/winamp-skin-frontends, targeting 2.0. These commands create
+Build from the 2.0 branch (or a working branch based on it). These commands create
 local development drawers. They do not publish, tag, merge or update 1.4.0.
 Run from the repository root with the Amiga cross-compiler tools on PATH.
 
@@ -12,7 +12,8 @@ make -f Makefile.amiga launcher-test interface-prefs-test skin-format-test skin-
   gadtools-radio-layout-test playlist-format-test radio-metadata-test \
   radio-oggflac-test radio-favourites-test display-text-test freeall-heads-test \
   aac-mulshift60-ref-test ogg-mulshift60-ref-test wma-mulshift-ref-test \
-  flac-lpc-ref-test mpeg25-decode-test
+  flac-lpc-ref-test mpeg25-decode-test fdct32-lowbands-test \
+  polyphase-stride3-reduced-test
 
 68030 drawer (68030/68040 and compatible accelerated systems)
 -----------------------------------------------------------

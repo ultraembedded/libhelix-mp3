@@ -288,10 +288,13 @@ static const unsigned char *MrSkinArtwork(MrApp *app)
     for (i=0;i<MR_ART_W*MR_ART_H;++i) grey[i*3]=grey[i*3+1]=grey[i*3+2]=app->artGreyBuf[i];
     return grey;
 }
+/* Skin events handled since the main loop last refreshed the skin. */
+static int gSkinEvents;
 static void MrSkinPoll(MrApp *app,int *done)
 {
     SkinEvent e;
     while (skin_player_poll(gSkinPlayer,&e)) {
+        ++gSkinEvents;
         switch (e.action) {
         case SKIN_QUIT: *done=1; return;
         case SKIN_ABOUT: ShowAbout(app); break;
@@ -439,7 +442,6 @@ static void MrSkinUpdate(MrApp *app,int tick)
     state.mono=gSkinAudio.channels==1; state.rate=gGuiPlaybackStatus.sampleRate;
     state.bitrate=gSkinAudio.bitrate ? gSkinAudio.bitrate : gGuiPlaybackStatus.radioBitrateKbps;
     state.filter=app->hardwareFilter;
-    snprintf(state.debug_text,sizeof(state.debug_text),"BUF %luMS SPARE %ldMS UNDERRUN %lu",gGuiPlaybackStatus.halfBufferMs,gGuiPlaybackStatus.spareMs,gGuiPlaybackStatus.underruns);
     skin_player_update(gSkinPlayer,&state,tick);
     MrSkinPlaylistUpdate(app);
     skin_player_artwork_enabled(gSkinPlayer,app->artEnabled);

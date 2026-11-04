@@ -69,6 +69,9 @@ jobs:
       - name: Check launcher selection, Workbench icon and bounded visual workload
         run: make -f Makefile.amiga launcher-test interface-prefs-test skin-performance-test skin-sprite-test
 
+      - name: Check the 14700 Hz fast path and 68060 multiplies (low-band DCT, reduced filter, whole-file PCM)
+        run: make -f Makefile.amiga fdct32-lowbands-test polyphase-stride3-reduced-test mp3-decode-hash-test
+
       - name: Check shared skin controls and MP3 equaliser bypass
         run: make -f Makefile.amiga skin-controls-test skin-eq-decode-test
 

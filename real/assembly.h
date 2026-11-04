@@ -286,6 +286,32 @@ static __inline int MULSHIFT32_AMIGA_M68K_ASM(int x, int y)
 }
 #define MULSHIFT32_HAS_AMIGA_M68K_ASM 1
 #define MULSHIFT32(x, y) MULSHIFT32_AMIGA_M68K_ASM((x), (y))
+#elif defined(AMIGA_M68K) && defined(AMIGA_M68K_POLYPHASE_68060)
+/*
+ * 68060 C builds: the 32x32->64 product above compiles to a call to libgcc's
+ * ___muldi3 per multiply (the 060 has no hardware 64-bit multiply), which
+ * made the IMDCT, anti-alias and stereo stages the largest remaining decode
+ * cost. Compute the identical high word with hardware 32-bit multiplies
+ * (Warren "mulhs", as MulShift68060 in polyphase_68060.h). Bit-for-bit equal
+ * to MULSHIFT32_C_REFERENCE; tests/mp3_decode_hash_test.c checks whole-file
+ * PCM against the 64-bit build.
+ */
+static __inline int MULSHIFT32_68060(int x, int y)
+{
+	unsigned int x0 = (unsigned int)x & 0xFFFFu;
+	int x1 = x >> 16;
+	unsigned int y0 = (unsigned int)y & 0xFFFFu;
+	int y1 = y >> 16;
+	unsigned int w0 = x0 * y0;
+	int t = x1 * (int)y0 + (int)(w0 >> 16);
+	int w1 = t & 0xFFFF;
+	int w2 = t >> 16;
+
+	w1 = (int)x0 * y1 + w1;
+	return x1 * y1 + w2 + (w1 >> 16);
+}
+#define MULSHIFT32_HAS_AMIGA_M68K_ASM 0
+#define MULSHIFT32(x, y) MULSHIFT32_68060((x), (y))
 #else
 #define MULSHIFT32_HAS_AMIGA_M68K_ASM 0
 #define MULSHIFT32(x, y) MULSHIFT32_C_REFERENCE((x), (y))

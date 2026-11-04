@@ -1155,6 +1155,27 @@ static void EnvName(char *dst, size_t dstSize, const char *key)
 	strncat(dst, key, dstSize - strlen(dst) - 1);
 }
 
+/* RateIndex is a per-edition table position: MintAMP-GT lists 8287 Hz first,
+ * the ReAction edition does not, so the same index named different rates in
+ * the two. RateHz records the rate itself and wins when present. */
+static int RateIndexFromHz(int hz, int fallback, int count)
+{
+	int i, best = fallback;
+	long bestDiff = -1;
+	if (hz <= 0)
+		return fallback;
+	for (i = 0; i < count; i++) {
+		long d = (long)atoi(kRates[i]) - hz;
+		if (d < 0)
+			d = -d;
+		if (bestDiff < 0 || d < bestDiff) {
+			bestDiff = d;
+			best = i;
+		}
+	}
+	return best;
+}
+
 static int LoadEnvIntMaybe(const char *key, int *outValue, int minValue, int maxValue)
 {
 	char name[64];
@@ -1318,6 +1339,7 @@ static void SaveGuiSettings(HelixAmp3Gui *gui)
 	SaveEnvInt("FakeStereoDelayIndex", gui->fakeStereoDelayIndex);
 	SaveEnvInt("HardwareFilter", gui->hardwareFilter);
 	SaveEnvInt("RateIndex", gui->rateIndex);
+	SaveEnvInt("RateHz", atoi(kRates[gui->rateIndex]));
 	SaveEnvInt("BufferSeconds", gui->bufferSeconds);
 	SaveEnvInt("Volume", gui->volumePercent);
 	SaveEnvInt("QualityIndex", gui->qualityIndex);
@@ -6172,6 +6194,8 @@ static int GuiOpen(HelixAmp3Gui *gui,int argc,char **argv)
 	gui->fakeStereoDelayIndex = LoadEnvInt("FakeStereoDelayIndex", 2, 0, 4);
 	gui->hardwareFilter = LoadEnvInt("HardwareFilter", 0, 0, 1);
 	gui->rateIndex = LoadEnvInt("RateIndex", 2, 0, 5);
+	gui->rateIndex = RateIndexFromHz(LoadEnvInt("RateHz", 0, 0, 100000), gui->rateIndex,
+		(int)(sizeof(kRates) / sizeof(kRates[0])));
 	if (gui->cd32Ultrafast) {
 		gui->ultrafast = 0;
 		gui->fastLowrate = 1;
@@ -9944,6 +9968,8 @@ static int GuiMainReal(int argc, char **argv)
 		ULONG rbMask = gui.rbWin ? (1UL << gui.rbWin->UserPort->mp_SigBit) : 0;
 #ifdef MINTAMP_SKIN
 		ULONG skinMask=skin_player_signal(gSkinPlayer);
+		/* Captured before HandleTimerSignal() rearms the timer. */
+		int skinArtTimer=gui.timerIsArt, skinArtActive=gui.artDecode.active;
 #else
 		ULONG skinMask=0;
 #endif
@@ -9965,7 +9991,17 @@ static int GuiMainReal(int argc, char **argv)
 		HandlePlaylistPoll(&gui);
 		HandleRadioWindow(&gui);
 #ifdef MINTAMP_SKIN
-		GuiSkinUpdate(&gui,timerMask && (sigs & timerMask) && !gui.timerIsArt);
+		/* Refresh the skin only when something can have changed: a skin
+		 * event, another window/port, the one-second tick or finished
+		 * artwork. Skin drags and the 20 ms artwork decode timer otherwise
+		 * woke a full refresh, taking CPU from the equal-priority decoder. */
+		{
+			int skinTick=timerMask && (sigs & timerMask) && !skinArtTimer;
+			if (gSkinEvents || (sigs & ~(skinMask | timerMask)) || skinTick ||
+				skinArtActive != gui.artDecode.active)
+				GuiSkinUpdate(&gui,skinTick);
+			gSkinEvents=0;
+		}
 #endif
 	}
 	if (gui.playbackActive)

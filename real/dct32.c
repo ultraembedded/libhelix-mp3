@@ -427,7 +427,31 @@ static __inline void FDCT32_AMIGA_M68K_OUTPUT_LOW(const int *buf, int *d)
 #define FDCT32_HAS_AMIGA_M68K_ASM 0
 #endif
 
-#if defined(AMIGA_M68K)
+#if defined(AMIGA_M68K) && defined(AMIGA_M68K_POLYPHASE_68060)
+/* 68060: the C reference below makes GCC call libgcc's ___muldi3 (a full
+ * 64x64 software multiply) for every one of FDCT32's 80 multiplies, because
+ * the 060 has no 32x32->64 instruction. Compute the identical high word with
+ * hardware 32-bit multiplies instead -- the same Warren "mulhs" the 68060
+ * polyphase kernel uses (MulShift68060 in polyphase_68060.h), kept local so
+ * this file does not pull in the polyphase kernel. Bit-for-bit equal to
+ * MULSHIFT32_C_REFERENCE; tests/fdct32_lowbands_test.c checks the whole
+ * transform against the 64-bit reference. */
+static __inline int FDCT32_MULSHIFT32_68060(int x, int y)
+{
+	unsigned int x0 = (unsigned int)x & 0xFFFFu;
+	int x1 = x >> 16;
+	unsigned int y0 = (unsigned int)y & 0xFFFFu;
+	int y1 = y >> 16;
+	unsigned int w0 = x0 * y0;
+	int t = x1 * (int)y0 + (int)(w0 >> 16);
+	int w1 = t & 0xFFFF;
+	int w2 = t >> 16;
+
+	w1 = (int)x0 * y1 + w1;
+	return x1 * y1 + w2 + (w1 >> 16);
+}
+#define FDCT32_MULSHIFT32(x, y) FDCT32_MULSHIFT32_68060((x), (y))
+#elif defined(AMIGA_M68K)
 #define FDCT32_MULSHIFT32(x, y) MULSHIFT32_C_REFERENCE((x), (y))
 #else
 #define FDCT32_MULSHIFT32(x, y) MULSHIFT32((x), (y))
@@ -471,13 +495,15 @@ static __inline void FDCT32_AMIGA_M68K_OUTPUT_LOW(const int *buf, int *d)
  *                enough registers)
  **************************************************************************************/
 /* about 1ms faster in RAM */
+static void FDCT32SecondPassAndStore(int *buf, int *dest, int offset, int oddBlock,
+	int es, const int *cptr);
+
 void FDCT32_C_REFERENCE(int *buf, int *dest, int offset, int oddBlock, int gb)
 {
-    int i, s, tmp, es, oddBase, evenBase, delayOff, clipBits;
+    int i, es;
     const int *cptr = dcttab;
-    int a0, a1, a2, a3, a4, a5, a6, a7;
-    int b0, b1, b2, b3, b4, b5, b6, b7;
-	int *d;
+    int a0, a1, a2, a3;
+    int b0, b1, b2, b3;
 
 	/* scaling - ensure at least 6 guard bits for DCT
 	 * (in practice this is already true 99% of time, so this code is
@@ -499,6 +525,20 @@ void FDCT32_C_REFERENCE(int *buf, int *dest, int offset, int oddBlock, int gb)
 	D32FP(5, 1, 1, 2);
 	D32FP(6, 1, 1, 2);
 	D32FP(7, 1, 1, 4);
+
+	FDCT32SecondPassAndStore(buf, dest, offset, oddBlock, es, cptr);
+}
+
+/* FDCT32's second pass and polyphase output shuffle, shared by the full
+ * reference and the low-band variant below (both reach it with the same
+ * buf contents and cptr = dcttab + 24). */
+static void FDCT32SecondPassAndStore(int *buf, int *dest, int offset, int oddBlock,
+	int es, const int *cptr)
+{
+	int i, s, tmp, oddBase, evenBase, delayOff, clipBits;
+	int a0, a1, a2, a3, a4, a5, a6, a7;
+	int b0, b1, b2, b3, b4, b5, b6, b7;
+	int *d;
 
 	/* second pass */
 	for (i = 4; i > 0; i--) {
@@ -613,6 +653,59 @@ void FDCT32_C_REFERENCE(int *buf, int *dest, int offset, int oddBlock, int gb)
 		}
 	}
 }
+
+/* First-pass butterfly when buf[16..31] == 0 (a2 = a3 = 0). The general
+ * D32FP then reduces to the expressions below, and a multiply whose input is
+ * zero is skipped (MULSHIFT32(c, 0) << s == 0), so the result is bit-identical
+ * to FDCT32_C_REFERENCE. With an active-subbands cap of 10 (every-3rd output,
+ * 14700 Hz from 44.1 kHz) buf[10..15] are zero too, which removes the b2
+ * multiply from the first six butterflies. */
+#define FDCT32_MZ(c, x, s) ((x) ? (FDCT32_MULSHIFT32((c), (x)) << (s)) : 0)
+#define D32FP_LOW(i, s0, s1, s2) { \
+	a0 = buf[i];				a1 = buf[15-i]; \
+	b3 = FDCT32_MZ(cptr[0], a0, s0);	b2 = FDCT32_MZ(cptr[1], a1, s1); \
+	buf[i] = a0 + a1;			buf[15-i] = FDCT32_MZ(cptr[2], a0 - a1, s2); \
+	buf[16+i] = b2 + b3;			buf[31-i] = FDCT32_MZ(cptr[2], b3 - b2, s2); \
+	cptr += 3; \
+}
+
+/**************************************************************************************
+ * Function:    FDCT32LowBands_C_REFERENCE
+ *
+ * Description: FDCT32 for input whose upper 16 subbands are zero, as left by the
+ *              fast low-rate active-subbands cap (16/10/8/6 for stride 2/3/4/5).
+ *              Unlike FDCT32Half/Quarter it produces every polyphase row, so it
+ *              suits strides whose kept rows cover all of them over time (3, 5).
+ *
+ * Notes:       precondition buf[16..31] == 0 (checked by FDCT32LowBands);
+ *              bit-identical to FDCT32_C_REFERENCE under it
+ **************************************************************************************/
+static void FDCT32LowBands_C_REFERENCE(int *buf, int *dest, int offset, int oddBlock, int gb)
+{
+	int i, es;
+	const int *cptr = dcttab;
+	int a0, a1, b2, b3;
+
+	es = 0;
+	if (gb < 6) {
+		es = 6 - gb;
+		for (i = 0; i < 16; i++)
+			buf[i] >>= es;
+	}
+
+	D32FP_LOW(0, 1, 5, 1);
+	D32FP_LOW(1, 1, 3, 1);
+	D32FP_LOW(2, 1, 3, 1);
+	D32FP_LOW(3, 1, 2, 1);
+	D32FP_LOW(4, 1, 2, 1);
+	D32FP_LOW(5, 1, 1, 2);
+	D32FP_LOW(6, 1, 1, 2);
+	D32FP_LOW(7, 1, 1, 4);
+
+	FDCT32SecondPassAndStore(buf, dest, offset, oddBlock, es, cptr);
+}
+#undef D32FP_LOW
+#undef FDCT32_MZ
 
 /**************************************************************************************
  * Function:    FDCT32Half
@@ -1388,5 +1481,26 @@ void FDCT32(int *buf, int *dest, int offset, int oddBlock, int gb)
 	FDCT32_AMIGA_M68K_ASM(buf, dest, offset, oddBlock, gb);
 #else
 	FDCT32_C_REFERENCE(buf, dest, offset, oddBlock, gb);
+#endif
+}
+
+/* Full-row FDCT32 for the fast low-rate strides without a half/quarter
+ * transform. Builds with the hand-written 68030 FDCT32 keep it; elsewhere
+ * (68060) the low-band C version is used whenever the cap left buf[16..31]
+ * zero, with the full transform as the fallback. */
+void FDCT32LowBands(int *buf, int *dest, int offset, int oddBlock, int gb)
+{
+#if !FDCT32_HAS_AMIGA_M68K_ASM
+	int k;
+
+	for (k = 16; k < 32; k++) {
+		if (buf[k]) {
+			FDCT32(buf, dest, offset, oddBlock, gb);
+			return;
+		}
+	}
+	FDCT32LowBands_C_REFERENCE(buf, dest, offset, oddBlock, gb);
+#else
+	FDCT32(buf, dest, offset, oddBlock, gb);
 #endif
 }

@@ -728,14 +728,41 @@ release-clean:
 	rm -rf "$(RELEASE_ROOT)"
 
 clean:
-	rm -f MintAMP-Launch interface_prefs_test launch_options_test skin_performance_test skin_sprite_test skin_controls_test skin_eq_decode_test integer_stats_test gadtools_radio_layout_test display_text_test radio_favourites_test $(SKINGT_TARGET) $(SKINR_TARGET) skin_format_test $(TARGET) $(FAST030_TARGET) $(PROF030_TARGET) $(FAST030_HALFASM_TEST_TARGET) $(GUI_TARGET) $(GUIR_TARGET) $(GUI_TARGET).freeall-discovery $(GUIR_TARGET).freeall-discovery $(GUI_TARGET).freeall-heads $(GUIR_TARGET).freeall-heads $(GUI_HALFASM_TEST_TARGET) \
+	rm -f mp3_decode_hash_test mp3_decode_hash_test60 fdct32_lowbands_test fdct32_lowbands_test60 polyphase_stride3_reduced_test polyphase_stride3_reduced_test60 MintAMP-Launch interface_prefs_test launch_options_test skin_performance_test skin_sprite_test skin_controls_test skin_eq_decode_test integer_stats_test gadtools_radio_layout_test display_text_test radio_favourites_test $(SKINGT_TARGET) $(SKINR_TARGET) skin_format_test $(TARGET) $(FAST030_TARGET) $(PROF030_TARGET) $(FAST030_HALFASM_TEST_TARGET) $(GUI_TARGET) $(GUIR_TARGET) $(GUI_TARGET).freeall-discovery $(GUIR_TARGET).freeall-discovery $(GUI_TARGET).freeall-heads $(GUIR_TARGET).freeall-heads $(GUI_HALFASM_TEST_TARGET) \
 		amissl_https_get amissl_ssl_free_repro amissl_spawn_repro amissl_exec_repro amissl_child_worker_repro rb_stream_probe_test \
 		aac_mulshift60_ref_test ogg_mulshift60_ref_test wma_mulshift030_ref_test wma_mulshift060_ref_test \
 		flac_lpc030_ref_test flac_lpc060_ref_test polyphase60_ref_test radio_metadata_test radio_oggflac_test playlist_format_test \
 		mpeg25_decode_test
 	$(MAKE) -C decoders clean
 
-.PHONY: skin-controls-test skin-eq-decode-test integer-stats-test gadtools-radio-layout-test
+.PHONY: skin-controls-test skin-eq-decode-test integer-stats-test gadtools-radio-layout-test fdct32-lowbands-test polyphase-stride3-reduced-test mp3-decode-hash-test
+
+# 14700 Hz fast path: the low-band DCT is bit-exact against the reference,
+# and the 68060 hardware-multiply DCT matches the 64-bit build exactly.
+FASTLOW_TEST_FLAGS := -O2 -std=gnu99 -DAMIGA_M68K -DAMIGA_FAST_POLYPHASE -DAMIGA_FAST_REDUCED_TAPS \
+	-DAMIGA_FAST_SUBBAND_CAP -DAMIGA_FAST_FDCT32_QUARTER -I. -Ipub -Ireal
+FASTLOW_TEST_SOURCES := mp3dec.c mp3tabs.c real/*.c
+fdct32-lowbands-test:
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) tests/fdct32_lowbands_test.c $(FASTLOW_TEST_SOURCES) -o fdct32_lowbands_test
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) -DAMIGA_M68K_POLYPHASE_68060 tests/fdct32_lowbands_test.c $(FASTLOW_TEST_SOURCES) -o fdct32_lowbands_test60
+	./fdct32_lowbands_test > fdct32_lowbands.out
+	./fdct32_lowbands_test60 > fdct32_lowbands60.out
+	cat fdct32_lowbands.out fdct32_lowbands60.out
+	cmp fdct32_lowbands.out fdct32_lowbands60.out
+	rm -f fdct32_lowbands.out fdct32_lowbands60.out
+mp3-decode-hash-test:
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) tests/mp3_decode_hash_test.c $(FASTLOW_TEST_SOURCES) -o mp3_decode_hash_test
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) -DAMIGA_M68K_POLYPHASE_68060 tests/mp3_decode_hash_test.c $(FASTLOW_TEST_SOURCES) -o mp3_decode_hash_test60
+	./mp3_decode_hash_test > mp3_decode_hash.out
+	./mp3_decode_hash_test60 > mp3_decode_hash60.out
+	cat mp3_decode_hash60.out
+	cmp mp3_decode_hash.out mp3_decode_hash60.out
+	rm -f mp3_decode_hash.out mp3_decode_hash60.out
+polyphase-stride3-reduced-test:
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) tests/polyphase_stride3_reduced_test.c $(FASTLOW_TEST_SOURCES) -o polyphase_stride3_reduced_test
+	$(HOSTCC) $(FASTLOW_TEST_FLAGS) -DAMIGA_M68K_POLYPHASE_68060 tests/polyphase_stride3_reduced_test.c $(FASTLOW_TEST_SOURCES) -o polyphase_stride3_reduced_test60
+	./polyphase_stride3_reduced_test
+	./polyphase_stride3_reduced_test60
 
 gadtools-radio-layout-test:
 	$(HOSTCC) -O2 -std=gnu89 -Wall -Wextra -Werror -I. tests/gadtools_radio_layout_test.c -o gadtools_radio_layout_test

@@ -155,7 +155,7 @@ immediately. A forced exit can lose the latest disk preferences.
 | Menu About | Existing frontend version and decoder credits requester |
 | Visualisation area / menu | Cycle off, spectrum and oscilloscope |
 | Menu Visual rate | 1, 2 or 4 analysis updates per second |
-| Menu Playback statistics | Buffer length, spare time, underruns, radio buffered bytes and source/output details; optional title-line overlay |
+| Menu Playback statistics | Buffer length, spare time, underruns, radio buffered bytes and source/output details in a requester. The title line always keeps the track name |
 | S / menu Load skin | Transactional skin replacement |
 | D / menu Double size | Normal/double size (ticked while doubled) |
 | W / shade button | Main windowshade; graphics and visual analysis stop while shaded |
@@ -252,7 +252,7 @@ screen uses the native playlist. Native settings/favourites remain accessible.
 The skin edition's settings live in their own skinned window: the
 PLEDIT.BMP title, side and scrollbar sprites with PLEDIT.TXT colours and
 ROM Topaz rows, like the playlist. It docks and snaps with the other skin
-windows (Ctrl-drag detaches), has the same right-button menus, and closes
+windows (drag it away to undock), has the same right-button menus, and closes
 with its close button, Escape or T. It opens beside the main window and
 remembers its place for the rest of the session.
 
@@ -325,7 +325,25 @@ analysis interval. The 4 Hz option improves drawing cadence but cannot make
 the backend submit samples more often.
 
 Cached native bitmaps and incremental rendering remain in use. Stationary
-states produce no draw calls. Palette/bitmap memory is bounded, but optional EQ
+states produce no draw calls.
+
+The GUI task and the playback task share priority 0, so GUI work comes
+straight out of decoding time. To keep that small:
+
+- Skin windows report pointer movement only while a mouse button is held,
+  so hovering over the player wakes nothing.
+- Dragging a window group moves the windows once Intuition has applied the
+  previous move (IntuiTicks flush the last step), leading window first, so
+  a fast drag no longer queues dozens of layer moves.
+- Skin windows use smart refresh, so windows uncovered during a drag are
+  restored by layers instead of being repainted.
+- Volume, balance, seek, EQ and playlist-scrollbar drags act once on the
+  newest pointer position in each batch of queued moves.
+- Both frontends refresh the skin only after a skin event, another window or
+  port signal, their own status tick or finished artwork, not after every
+  pointer wakeup. The artwork change check samples the 64x64 image.
+- The ReAction edition, like GadTools, defers ENVARC settings writes (volume
+  and others) until playback stops or the program exits. Palette/bitmap memory is bounded, but optional EQ
 artwork adds a cached sheet; double size increases bitmap memory fourfold.
 New controls compile without floating-point or emulated 64-bit multiply
 instructions in the audited 68060 object. This does not prove real-time timing
@@ -361,10 +379,13 @@ Double-click the artwork for the file/stream information.
 
 ## Windows and persistence
 
-Nearby main/EQ/playlist/artwork edges snap on release (eight scaled pixels). Docked
-windows move together; Ctrl-drag moves one window to detach it. Moves are
+Nearby main/EQ/playlist/artwork edges snap on release (eight scaled pixels). As in
+Winamp, dragging the main window carries the windows docked to it, while
+dragging the playlist, EQ, artwork or settings window moves only that
+window, so dragging it away undocks it; Ctrl-drag moves the main window
+alone. Moves are
 bounded to the screen. Positions, visibility (including artwork), main shade, shuffle/repeat,
-balance, time mode, EQ, visual rate/mode and debug overlay persist in each
+balance, time mode, EQ and visual rate/mode persist in each
 edition's separate `ENV:/ENVARC:` State variable, alongside Skin/Scale. Native
 audio settings and favourites keep their established storage. Restored
 positions are clamped when screen/scale changes.
