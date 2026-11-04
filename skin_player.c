@@ -333,7 +333,11 @@ static void drag_begin(SkinPlayer *p,int root,UWORD qualifier)
 {
     SkinRect r[SKIN_WINDOWS]; struct Window *windows[SKIN_WINDOWS]; int i;
     p->drag_group=0; window_rects(p,r,windows);
-    p->drag_group=(qualifier&IEQUALIFIER_CONTROL) ? 1U<<root : skin_window_group(r,SKIN_WINDOWS,root,2*p->resources->scale);
+    /* As in Winamp: the main window carries the windows docked to it;
+     * dragging any other window (or Ctrl-dragging the main one) moves only
+     * that window, which then snaps or undocks where it is dropped. */
+    p->drag_group=(root!=0 || (qualifier&IEQUALIFIER_CONTROL)) ? 1U<<root :
+        skin_window_group(r,SKIN_WINDOWS,root,2*p->resources->scale);
     for (i=0;i<SKIN_WINDOWS;++i) { p->drag_wx[i]=(WORD)r[i].x; p->drag_wy[i]=(WORD)r[i].y; }
     p->drag_pdx=p->drag_pdy=0; p->drag_root=root; p->drag_waits=0;
     if (p->drag_group) drag_ticks(p,1);

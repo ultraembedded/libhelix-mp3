@@ -1097,6 +1097,27 @@ static void EnvName(char *dst, size_t dstSize, const char *key)
 	strncat(dst, key, dstSize - strlen(dst) - 1);
 }
 
+/* RateIndex is a per-edition table position: MintAMP-GT lists 8287 Hz first,
+ * the ReAction edition does not, so the same index named different rates in
+ * the two. RateHz records the rate itself and wins when present. */
+static int RateIndexFromHz(int hz, int fallback, int count)
+{
+	int i, best = fallback;
+	long bestDiff = -1;
+	if (hz <= 0)
+		return fallback;
+	for (i = 0; i < count; i++) {
+		long d = (long)atoi(kRates[i]) - hz;
+		if (d < 0)
+			d = -d;
+		if (bestDiff < 0 || d < bestDiff) {
+			bestDiff = d;
+			best = i;
+		}
+	}
+	return best;
+}
+
 static int LoadEnvIntMaybe(const char *key, int *outValue, int minValue, int maxValue)
 {
 	char name[64], value[32]; long n; int v;
@@ -1230,6 +1251,7 @@ static void LoadSettings(MrApp *app)
 	app->fakeStereoDelayIndex = LoadEnvInt("FakeStereoDelayIndex", app->fakeStereoDelayIndex, 0, 4);
 	app->hardwareFilter = LoadEnvInt("HardwareFilter", app->hardwareFilter, 0, 1);
 	app->rateIndex = LoadEnvInt("RateIndex", app->rateIndex, 0, MR_RATE_COUNT - 1);
+	app->rateIndex = RateIndexFromHz(LoadEnvInt("RateHz", 0, 0, 100000), app->rateIndex, MR_RATE_COUNT);
 	if (app->cd32Ultrafast) {
 		/* Mono-only: drop any stale saved fake-stereo so the greyed Mode/width
 		 * chooser comes up parked on "Normal M/S" rather than a fake-stereo
@@ -1267,6 +1289,7 @@ static void SaveSettingsNow(MrApp *app)
 	SaveEnvInt("FakeStereoDelayIndex", app->fakeStereoDelayIndex);
 	SaveEnvInt("HardwareFilter", app->hardwareFilter);
 	SaveEnvInt("RateIndex", app->rateIndex);
+	SaveEnvInt("RateHz", atoi(kRates[app->rateIndex]));
 	SaveEnvInt("BufferSeconds", ClampInt(app->bufferSeconds, 1, 10));
 	SaveEnvInt("Volume", ClampInt(app->volumePercent, 0, 100));
 	SaveEnvInt("QualityIndex", app->qualityIndex);

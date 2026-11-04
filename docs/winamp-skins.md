@@ -252,7 +252,7 @@ screen uses the native playlist. Native settings/favourites remain accessible.
 The skin edition's settings live in their own skinned window: the
 PLEDIT.BMP title, side and scrollbar sprites with PLEDIT.TXT colours and
 ROM Topaz rows, like the playlist. It docks and snaps with the other skin
-windows (Ctrl-drag detaches), has the same right-button menus, and closes
+windows (drag it away to undock), has the same right-button menus, and closes
 with its close button, Escape or T. It opens beside the main window and
 remembers its place for the rest of the session.
 
@@ -379,8 +379,11 @@ Double-click the artwork for the file/stream information.
 
 ## Windows and persistence
 
-Nearby main/EQ/playlist/artwork edges snap on release (eight scaled pixels). Docked
-windows move together; Ctrl-drag moves one window to detach it. Moves are
+Nearby main/EQ/playlist/artwork edges snap on release (eight scaled pixels). As in
+Winamp, dragging the main window carries the windows docked to it, while
+dragging the playlist, EQ, artwork or settings window moves only that
+window, so dragging it away undocks it; Ctrl-drag moves the main window
+alone. Moves are
 bounded to the screen. Positions, visibility (including artwork), main shade, shuffle/repeat,
 balance, time mode, EQ and visual rate/mode persist in each
 edition's separate `ENV:/ENVARC:` State variable, alongside Skin/Scale. Native
