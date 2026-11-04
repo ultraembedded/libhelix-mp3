@@ -1,0 +1,55 @@
+Short:        MintAMP 2.0 development player
+Author:       Darren Banfi (boingball)
+Uploader:     boingball@gmail.com (Darren Banfi)
+Type:         mus/play
+Version:      2.0-dev
+Requires:     68030+; TCP/IP for radio; AmiSSL for HTTPS; ReAction or GadTools
+Architecture: m68k-amigaos >= 3.0.0
+
+MintAMP 2.0 development - PR #521
+================================
+
+Use the MintAMP-2.0-dev-68030 or MintAMP-2.0-dev-68060 drawer appropriate to
+your processor. Keep its decoder modules and Skins drawer with the players.
+This is a development build awaiting real-hardware acceptance.
+
+Double-click MintAMP-Launch: the bundled mint-leaf skin opens first.
+Right-click the skin and tick MintAMP / Classic interface to switch the
+running player to the classic MintAMP window; untick Project / Classic
+interface there to return to the skin. Playback continues either way and
+the choice is remembered for the next launch.
+
+Use Interface preferences in either interface to choose ReAction or
+GadTools and Skin or Classic for subsequent launches, or run
+MintAMP-Launch --prefs from a Shell.
+
+The launcher icon includes disabled examples of these ToolTypes:
+  (GUI=REACTION)
+  (MODE=CLASSIC)
+  (SKIN=PROGDIR:Skins/MintAMP-mintleaf.wsz)
+  (DOUBLESIZE=NO)
+
+Remove parentheses to force a setting. Explicit CLI arguments override
+ToolTypes, which override saved preferences, which override defaults.
+Leave examples disabled for the saved GUI/appearance preferences to work.
+
+The skin covers MintAMP's features: files, playlists, stream URLs, Internet
+radio and favourites, file/stream info, artwork window, seek and volume keys,
+audio filter, iconify, MP3 EQ, balance and spectrum (EQ/spectrum start off).
+Settings (T) opens a skinned settings window holding only the settings;
+its Classic mode row switches to the classic interface. Artwork (A) uses the
+skin's MB.BMP frame with 128x128 art and the track title.
+
+Launch methods:
+  MintAMP-Launch  Skin first, Classic on a tick (ReAction or GadTools)
+  MintAMP-SR      Skin/Classic ReAction    MintAMP-SGT  Skin/Classic GadTools
+  MintAMP         Classic-only ReAction    MintAMP-GT   Classic-only GadTools
+  amiga_mp3dec.fastexp                     Command-line player
+
+Details: Skins/ReadMe, docs/winamp-skins.md and the hardware acceptance checklist.
+No Winamp Windows DLL plug-ins, modern WAL skins or all-format biquad EQ.
+
+Made by Darren Banfi / boingball, with Helix MP3/AAC, libfoxenflac,
+ESP8266Audio and Tremor. Existing licences and decoder credits apply.
+Support: https://buymeacoffee.com/boingball
+Repository: https://github.com/boingball/MintAMP

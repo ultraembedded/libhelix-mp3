@@ -326,6 +326,8 @@ static void radio_net_job_free(RadioNetWorkerJob *job)
 #endif
 }
 
+#endif /* HAVE_AMISSL: the allocators below also serve plain HTTP. */
+
 /* Every per-request / per-connection network object -- the open+IO request
  * blocks, their duplicated URL/host/category strings, the payload buffers and
  * the RadioNetTransport itself -- is allocated with AllocVec/FreeVec instead
@@ -368,6 +370,7 @@ static void radio_net_free(void *p)
 #endif
 }
 
+#if defined(HAVE_AMISSL)
 static int radio_net_worker_is_self(void)
 {
     return radio_net_worker_task != NULL && FindTask(NULL) == radio_net_worker_task;
@@ -1067,7 +1070,9 @@ void Radio_ReportTlsFault(const char *where)
 {
     radio_tls_fault_count++;
     radio_tls_shutdown_quarantine = 1;
+#if defined(AMIGA_M68K) && defined(HAVE_AMISSL)
     radio_worker_ssl_ctx_poisoned = 1;
+#endif
     Radio_MarkTlsPoisoned(where && where[0] ? where : "fatal TLS fault");
     RADIO_DBG(printf("radio-tls: TLS fault %ld where=%s session=%lu url=\"%s\" -- objects quarantined, shared SSL_CTX poisoned, HTTPS disabled for this run\n",
         radio_tls_fault_count, where ? where : "",
@@ -1747,6 +1752,8 @@ static int radio_ssl_wait_ready(RADIO_SOCKET sock, int ssl_error)
 #endif
 }
 
+#endif /* HAVE_AMISSL: SO_ERROR is also used by plain HTTP transports. */
+
 static int radio_socket_connect_error(RADIO_SOCKET sock, long *out_error)
 {
     int so_error = 0;
@@ -1764,7 +1771,6 @@ static int radio_socket_connect_error(RADIO_SOCKET sock, long *out_error)
     if (out_error) *out_error = so_error;
     return so_error == 0 ? 0 : -1;
 }
-#endif
 
 static void radio_log_socket_failure(RadioStream *rs, const char *context, const char *where)
 {

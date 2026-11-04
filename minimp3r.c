@@ -1,3 +1,4 @@
+#include "interface_prefs.h"
 /*
  * MintAMP - Mini Internet Amiga Media Player ReAction/ClassAct frontend for the Helix fixed-point
  * MP3 decoder, aimed at AmigaOS 3.3/3.5/3.9 (and 68k boards with ReAction or
@@ -25,6 +26,15 @@
 #include "radio_runtime_flags.h"
 #include "amiga_display_text.h"
 #include "miniamp_memguard.h"
+#if defined(MINTAMP_SKIN) && defined(AMIGA_M68K)
+#include "skin_player.h"
+static SkinPlayer *gSkinPlayer;
+static int gSkinPendingTrack = -1;
+/* Startup arguments for the first skin opened, possibly after Classic. */
+static int gSkinArgc;
+static char **gSkinArgv;
+static char gSkinPendingUrl[512];
+#endif
 
 #if defined(AMIGA_M68K)
 
@@ -77,13 +87,17 @@
  * in here doubled up into a malformed path that silently failed to persist
  * across reboots while the plain ENV: (RAM) write kept working. */
 #define MR_ENV_PREFIX "MintAMP"
-#define MINTAMP_VERSION "1.4.0"
+#define MINTAMP_VERSION "2.0-dev"
 #define MR_SETTINGS_VERSION 1
 #define MR_RADIO_FAV_MAX 50
 
 /* AmigaOS Version command metadata; unrelated to MR_SETTINGS_VERSION. */
 static const char gMintAmpVersionTag[] __attribute__((used)) =
+#ifdef MINTAMP_SKIN
+	"\0$VER: MintAMP-SR " MINTAMP_VERSION " (10.10.2026)";
+#else
 	"\0$VER: MintAMP " MINTAMP_VERSION " (08.10.2026)";
+#endif
 #if !defined(__AROS__) && !defined(MR_DISABLE_CIA_FILTER)
 #define MR_ENABLE_CIA_FILTER 1
 #endif
@@ -418,13 +432,23 @@ static const char * const kHttpsWaitDesc[HTTPS_WAIT_COUNT] = {
 	"default (~0.1s)", "0.5s", "1s", "2s", "4s"
 };
 
+#ifdef MINTAMP_SKIN
+#define ITEMNUM_CLASSIC   5
+#define PROJECT_ITEM_COUNT 6
+#else
+#define PROJECT_ITEM_COUNT 5
+#endif
 static struct Menu kMenus[2];
-static struct MenuItem kProjectItems[4];
+static struct MenuItem kProjectItems[PROJECT_ITEM_COUNT];
 static struct MenuItem kPlaybackItems[PLAYBACK_ITEM_COUNT];
-static struct IntuiText kProjectText[4];
+static struct IntuiText kProjectText[PROJECT_ITEM_COUNT];
 static struct IntuiText kPlaybackText[PLAYBACK_ITEM_COUNT];
-static const char * const kProjectLabels[4] = {
-	"About MintAMP...", "Internet Radio", "Iconify", "Quit"
+static const char * const kProjectLabels[PROJECT_ITEM_COUNT] = {
+	"About MintAMP...", "Internet Radio", "Iconify", "Quit", "Interface preferences..."
+#ifdef MINTAMP_SKIN
+	/* Ticked while this window is the main interface; untick for the skin. */
+	, "Classic interface"
+#endif
 };
 static const char * const kPlaybackLabels[PLAYBACK_ITEM_COUNT] = {
 	"Decode-then-play", "Bench mode", "Artwork", "Artwork Cache",
@@ -457,7 +481,7 @@ static void MrInitMenuStrip(void)
 	kMenus[1].Flags = MENUENABLED;
 	kMenus[1].MenuName = (STRPTR)"Playback";
 	kMenus[1].FirstItem = &kPlaybackItems[0];
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < PROJECT_ITEM_COUNT; i++) {
 		/* Pen 0 is the screen's light/background pen, pen 1 is black on
 		 * the standard 4-colour Workbench palette -- these were swapped,
 		 * so JAM1 (which only uses FrontPen) drew the item text in the
@@ -468,12 +492,18 @@ static void MrInitMenuStrip(void)
 		kProjectText[i].LeftEdge = 2;
 		kProjectText[i].TopEdge = 1;
 		kProjectText[i].IText = (STRPTR)kProjectLabels[i];
-		kProjectItems[i].NextItem = (i < 3) ? &kProjectItems[i + 1] : NULL;
+		kProjectItems[i].NextItem = (i < PROJECT_ITEM_COUNT - 1) ? &kProjectItems[i + 1] : NULL;
 		kProjectItems[i].LeftEdge = 0;
 		kProjectItems[i].TopEdge = i * 10;
-		kProjectItems[i].Width = 152;
+		kProjectItems[i].Width = 200;
 		kProjectItems[i].Height = 10;
 		kProjectItems[i].Flags = ITEMTEXT | ITEMENABLED | HIGHCOMP;
+#ifdef MINTAMP_SKIN
+		if (i == ITEMNUM_CLASSIC) {
+			kProjectItems[i].Flags |= CHECKIT | MENUTOGGLE;
+			kProjectText[i].LeftEdge = 14;
+		}
+#endif
 		kProjectItems[i].ItemFill = (APTR)&kProjectText[i];
 		kProjectItems[i].NextSelect = MENUNULL;
 	}
@@ -587,7 +617,11 @@ static volatile unsigned long gEntryRunId;
 static volatile unsigned long gDoneRunId;
 #define MR_APP_MAGIC 0x4d523047UL
 #define MR_DONE_MAGIC 0x4d52444fUL
+#ifdef MINTAMP_SKIN
+#define MR_WINDOW_TITLE (gSkinPlayer ? "MintAMP-SR Settings" : "MintAMP-SR")
+#else
 #define MR_WINDOW_TITLE "MintAMP"
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* Application state                                                         */
@@ -751,6 +785,9 @@ typedef struct MrApp {
 	unsigned char artRGBBuf[MR_ART_W * MR_ART_H * 3];
 	unsigned char artPenIdx[MR_ART_W * MR_ART_H];
 	int   playlistCount;
+#ifdef MINTAMP_SKIN
+    int playlistDurations[MR_PLAYLIST_MAX];
+#endif
 	int   playlistCurrent;
 	int   playlistSelected;
 	int   playlistNextPending;
@@ -2193,7 +2230,11 @@ static void FinalizePlayback(MrApp *app)
 		if (MrIsRadioInput(app->inputName))
 			Delay(10);
 		PlaylistStartCurrent(app);
-	}
+    }
+#if defined(MINTAMP_SKIN) && defined(AMIGA_M68K)
+    else if (gSkinPlayer && !stoppedByUser && !failedStart && gSkinAudio.completed_ok)
+        gSkinPendingTrack=skin_player_order(gSkinPlayer,app->playlistCount,app->playlistCurrent,1,1);
+#endif
 }
 
 static void HandleDoneSignal(MrApp *app)
@@ -3167,6 +3208,19 @@ static int MrOpenWindow(MrApp *app)
 		return 0;
 	}
 
+#ifdef MINTAMP_SKIN
+	/* The BOOPSI tree retains settings while closed. Do not open its native
+	 * window merely to close it again once the skin is visible. */
+	if (gSkinPlayer) {
+		MrSetGadgetAttr(app->bufferGad,NULL,GA_Disabled,(ULONG)app->decodeThenPlay);
+		if (!app->hasNetwork) {
+			struct MenuItem *item=ItemAddress(app->menuStrip,
+				FULLMENUNUM(MENUNUM_PROJECT,ITEMNUM_RADIO,NOSUB));
+			if (item) item->Flags &= ~ITEMENABLED;
+		}
+		return 1;
+	}
+#endif
 	app->win = (struct Window *)RA_OpenWindow(app->winObj);
 	if (!app->win) {
 		fprintf(stderr, "MintAMP: could not open the window.\n");
@@ -3183,6 +3237,10 @@ static int MrOpenWindow(MrApp *app)
 
 static void MrCloseWindow(MrApp *app)
 {
+#ifdef MINTAMP_SKIN
+	/* Also release the player if creating the native settings tree failed. */
+	skin_player_close(gSkinPlayer); gSkinPlayer=NULL;
+#endif
 	RADIO_DBG(printf("app-close: MrCloseWindow enter rbWin=%p plWin=%p menuStrip=%p winObj=%p\n",
 		app->rbWin, app->plWin, app->menuStrip, app->winObj);)
 	CloseRadioWindow(app);
@@ -5235,11 +5293,7 @@ SafeCopy(app->inputName, sizeof(app->inputName), path);
 CopyDrawerFromPath(app->lastDrawer, sizeof(app->lastDrawer), app->inputName);
 SaveSettings(app);
 
-if (app->fileGad && app->win) {
-SetGadgetAttrs((struct Gadget *)app->fileGad, app->win, NULL,
-GETFILE_FullFile, (ULONG)app->inputName,
-TAG_DONE);
-}
+MrSetGadgetAttr(app->fileGad, app->win, GETFILE_FullFile, (ULONG)app->inputName);
 
 app->playlistCount = 0;
 app->playlistCurrent = -1;
@@ -5255,9 +5309,7 @@ FreeAslRequest(fr);
 
 static void UpdateFileGadget(MrApp *app)
 {
-	if (app->fileGad && app->win)
-		SetGadgetAttrs((struct Gadget *)app->fileGad, app->win, NULL,
-			GETFILE_FullFile, (ULONG)app->inputName, TAG_DONE);
+	MrSetGadgetAttr(app->fileGad, app->win, GETFILE_FullFile, (ULONG)app->inputName);
 }
 
 static void PlaylistNext(MrApp *app)
@@ -5304,6 +5356,9 @@ static int PlaylistAddEntry(MrApp *app, const char *location, const char *title)
 		return 0;
 	SafeCopy(app->playlist[n], MR_MAX_PATH, location);
 	SafeCopy(app->playlistTitles[n], sizeof(app->playlistTitles[n]), title ? title : "");
+#ifdef MINTAMP_SKIN
+    app->playlistDurations[n]=-1;
+#endif
 	app->playlistCount++;
 	return 1;
 }
@@ -5312,6 +5367,9 @@ typedef struct MrPlaylistLoad {
 	MrApp *app;
 	const char *drawer;
 	int skipped;
+#ifdef MINTAMP_SKIN
+    int before;
+#endif
 } MrPlaylistLoad;
 
 static int MrPlaylistLoadEntry(void *ctx, const char *location, const char *title)
@@ -5319,6 +5377,9 @@ static int MrPlaylistLoadEntry(void *ctx, const char *location, const char *titl
 	MrPlaylistLoad *load = (MrPlaylistLoad *)ctx;
 	char full[MR_MAX_PATH];
 	char shown[PLAYLIST_TITLE_MAX];
+#ifdef MINTAMP_SKIN
+    load->before=load->app->playlistCount;
+#endif
 	if (load->app->playlistCount >= MR_PLAYLIST_MAX)
 		return 0;
 	/* Downloaded playlists are usually UTF-8; the location stays as is. */
@@ -5338,6 +5399,10 @@ static int MrPlaylistLoadEntry(void *ctx, const char *location, const char *titl
 	return 1;
 }
 
+#ifdef MINTAMP_SKIN
+static void MrPlaylistDuration(void *ctx,int seconds)
+{ MrPlaylistLoad *load=(MrPlaylistLoad *)ctx; if (load->app->playlistCount>load->before) load->app->playlistDurations[load->app->playlistCount-1]=seconds; }
+#endif
 /* Reads a whole small text file into a NUL-terminated malloc()ed buffer. */
 static char *MrReadTextFile(const char *path, long maxBytes, long *lenOut)
 {
@@ -5376,7 +5441,11 @@ static void LoadPlaylistPath(MrApp *app, const char *m3uPath, const char *drawer
 	load.app = app;
 	load.drawer = drawer;
 	load.skipped = 0;
-	playlist_parse(text, (size_t)len, MrPlaylistLoadEntry, &load);
+	#ifdef MINTAMP_SKIN
+    playlist_parse_ex(text,(size_t)len,MrPlaylistLoadEntry,&load,MrPlaylistDuration);
+#else
+    playlist_parse(text, (size_t)len, MrPlaylistLoadEntry, &load);
+#endif
 	free(text);
 	if (app->playlistCount > 0) {
 		app->playlistCurrent = 0;
@@ -6335,6 +6404,11 @@ static void CloseRadioWindow(MrApp *app)
 
 static void OpenRadioWindow(MrApp *app)
 {
+	struct Window *parent = app->win;
+#ifdef MINTAMP_SKIN
+	if (!parent) parent = skin_player_window(gSkinPlayer);
+#endif
+
 	Object *root = NULL;
 	static STRPTR codecs[] = { (STRPTR)"All", (STRPTR)"MP3", (STRPTR)"AAC", (STRPTR)"AAC+", (STRPTR)"FLAC", NULL };
 	/* Window geometry, fitted to the actual screen.  The radio window's natural
@@ -6343,7 +6417,7 @@ static void OpenRadioWindow(MrApp *app)
 	 * ABOVE the top of the screen, so it can't be dragged.  Cap the size to the
 	 * screen and anchor the top below the screen title bar so the drag bar is
 	 * always reachable. */
-	struct Screen *rbScreen = app->win ? app->win->WScreen : NULL;
+	struct Screen *rbScreen = parent ? parent->WScreen : NULL;
 	LONG rbScrW = rbScreen ? (LONG)rbScreen->Width : 640;
 	LONG rbScrH = rbScreen ? (LONG)rbScreen->Height : 256;
 	LONG rbBarH = rbScreen ? (LONG)rbScreen->BarHeight + 1 : 11;
@@ -6361,7 +6435,7 @@ static void OpenRadioWindow(MrApp *app)
 		}
 		return;
 	}
-	if (!app->win || !app->hasNetwork)
+	if (!parent || !app->hasNetwork)
 		return;
 	if (app->rbController.limit <= 0) { rb_controller_init(&app->rbController); app->rbShowHttps = FALSE; app->rbSchemeMode = 0; app->rbCountryMode = 0; }
 	app->rbCountryMode = RadioCountryToIndex(app->rbController.countrycode); app->rbShowingFavourites = FALSE; app->rbSelectedFavourite = -1; NewList(&app->rbList);
@@ -6405,8 +6479,8 @@ static void OpenRadioWindow(MrApp *app)
 	 * Offsetting keeps the two title bars apart (the GadTools frontend already
 	 * opens its radio window at main + 30 for this reason).  Clamp so the whole
 	 * window still lands on-screen. */
-	rbWinLeft = (app->win ? (LONG)app->win->LeftEdge : 0) + 30;
-	rbWinTop  = (app->win ? (LONG)app->win->TopEdge : rbBarH) + 30;
+	rbWinLeft = (parent ? (LONG)parent->LeftEdge : 0) + 30;
+	rbWinTop  = (parent ? (LONG)parent->TopEdge : rbBarH) + 30;
 	if (rbWinLeft + rbWinW > rbScrW) rbWinLeft = rbScrW - rbWinW;
 	if (rbWinLeft < 0) rbWinLeft = 0;
 	if (rbWinTop + rbWinH > rbScrH) rbWinTop = rbScrH - rbWinH;
@@ -6519,6 +6593,10 @@ static const char *PlaylistBaseName(const char *path)
 
 static void RefreshPlaylistView(MrApp *app)
 {
+#if defined(MINTAMP_SKIN) && defined(AMIGA_M68K)
+    if (skin_player_paths(gSkinPlayer,&app->playlist[0][0],sizeof(app->playlist[0]),
+        app->playlistCount,app->playlistCurrent,app->playlistSelected)) gSkinPendingTrack=-1;
+#endif
 	int i;
 	int sel = app->playlistSelected >= 0 ? app->playlistSelected : app->playlistCurrent;
 	if (app->plWin && app->plListGad) {
@@ -6625,6 +6703,9 @@ static void PlaylistRemoveSelected(MrApp *app)
 		return;
 	}
 	for (i = sel; i < app->playlistCount - 1; i++) {
+#ifdef MINTAMP_SKIN
+        app->playlistDurations[i]=app->playlistDurations[i+1];
+#endif
 		SafeCopy(app->playlist[i], MR_MAX_PATH, app->playlist[i + 1]);
 		SafeCopy(app->playlistTitles[i], sizeof(app->playlistTitles[i]), app->playlistTitles[i + 1]);
 	}
@@ -6697,8 +6778,13 @@ static void PlaylistSaveM3U(MrApp *app)
 	}
 	ok = MrWriteAll(fh, text, playlist_write_header(text, sizeof(text), format));
 	for (i = 0; ok && i < app->playlistCount; i++)
-		ok = MrWriteAll(fh, text, playlist_write_entry(text, sizeof(text), format, i + 1,
-			app->playlist[i], app->playlistTitles[i]));
+		ok = MrWriteAll(fh,text,
+#ifdef MINTAMP_SKIN
+            playlist_write_entry_ex(text,sizeof(text),format,i+1,app->playlist[i],app->playlistTitles[i],app->playlistDurations[i])
+#else
+            playlist_write_entry(text,sizeof(text),format,i+1,app->playlist[i],app->playlistTitles[i])
+#endif
+        );
 	if (ok)
 		ok = MrWriteAll(fh, text, playlist_write_footer(text, sizeof(text), format, app->playlistCount));
 	Close(fh);
@@ -6847,10 +6933,15 @@ static Object *PlaylistButton(ULONG id, const char *text)
 
 static void OpenPlaylistWindow(MrApp *app)
 {
+	struct Window *parent = app->win;
+#ifdef MINTAMP_SKIN
+	if (!parent) parent = skin_player_window(gSkinPlayer);
+#endif
+
 	Object *root = NULL;
 	int sel;
 
-	if (app->plWinObj || !app->win)
+	if (app->plWinObj || !parent)
 		return;
 
 	RefreshPlaylistView(app);
@@ -7126,6 +7217,9 @@ static void SyncMenuChecks(MrApp *app)
 			SetMenuItemChecked(app, MENUNUM_PLAYBACK,
 				ITEMNUM_HTTPSWAIT_BASE + i, app->httpsWaitIndex == i);
 	}
+#ifdef MINTAMP_SKIN
+	SetMenuItemChecked(app, MENUNUM_PROJECT, ITEMNUM_CLASSIC, gSkinPlayer == NULL);
+#endif
 }
 
 static void MrIconify(MrApp *app)
@@ -7136,6 +7230,8 @@ static void MrIconify(MrApp *app)
 	 * AppIcon.  Playback/timer/done ports remain alive and audio continues. */
 	CloseRadioWindow(app);
 	ClosePlaylistWindow(app);
+	/* Shared pens can only be released while their screen is known. */
+	ReleaseArtColorPens(app);
 	if (RA_Iconify(app->winObj))
 		app->win = NULL;
 }
@@ -7147,7 +7243,18 @@ static void MrUniconify(MrApp *app)
 	app->win = (struct Window *)RA_OpenWindow(app->winObj);
 	if (!app->win)
 		return;
+#ifdef MINTAMP_SKIN
+	/* On the first open the full chooser label list reserves its width, then
+	 * narrow it as in the standard startup path. Reapply current enablement
+	 * after the hidden period, including a saved mono-only speed mode. */
+	UpdateSpeedGadgetChoices(app);
+	app->shownChannelDisabled=app->shownWidthDisabled=-1;
+	UpdateChannelGadgetState(app);
+	MrSetGadgetAttr(app->bufferGad,app->win,GA_Disabled,(ULONG)app->decodeThenPlay);
+#endif
 	UpdateFastMemGadgetState(app);
+	if (app->artValid && app->artColorEnabled && !app->artPensBuilt)
+		BuildArtColorPens(app);
 	DrawArtPanel(app);
 	WindowToFront(app->win);
 	ActivateWindow(app->win);
@@ -7168,6 +7275,26 @@ static void SetDecodeThenPlay(MrApp *app, int enabled)
 	SaveSettings(app);
 }
 
+static void ShowAbout(MrApp *app)
+{
+	struct Window *parent=app->win;
+	struct EasyStruct es;
+#ifdef MINTAMP_SKIN
+	if (!parent) parent=skin_player_window(gSkinPlayer);
+#endif
+	es.es_StructSize = sizeof(es);
+	es.es_Flags = 0;
+	es.es_Title = (UBYTE *)"About MintAMP";
+	es.es_TextFormat = (UBYTE *)"MintAMP\nMini Internet Amiga Media Player\nReAction Edition\nMade by boingball\n(C)2026 - v" MINTAMP_VERSION "\nTo support this application visit:\nhttps://buymeacoffee.com/boingball\n-----\nMade with decoders from\nHelix MP3 / AAC\nby Real Networks\nlibfoxenflac\nby astoeckel\n\nESP8266Audio\nby earlephilhower\n-----\nAI Used\nClaude and Codex\nLate Nights\nMany";
+	es.es_GadgetFormat = (UBYTE *)"OK";
+	EasyRequest(parent, &es, NULL, TAG_DONE);
+}
+
+#ifdef MINTAMP_SKIN
+static void MrSkinToClassic(MrApp *app);
+static void MrClassicToSkin(MrApp *app);
+#endif
+
 static void HandleMenu(MrApp *app, UWORD code, int *done)
 {
 	while (code != MENUNULL) {
@@ -7176,14 +7303,17 @@ static void HandleMenu(MrApp *app, UWORD code, int *done)
 			int mn = (int)MENUNUM(code), it = (int)ITEMNUM(code);
 			if (mn == MENUNUM_PROJECT && it == ITEMNUM_QUIT) *done = 1;
 			else if (mn == MENUNUM_PROJECT && it == ITEMNUM_ABOUT) {
-				struct EasyStruct es;
-				es.es_StructSize = sizeof(es);
-				es.es_Flags = 0;
-				es.es_Title = (UBYTE *)"About MintAMP";
-				es.es_TextFormat = (UBYTE *)"MintAMP\nMini Internet Amiga Media Player\nReAction Edition\nMade by boingball\n(C)2026 - v" MINTAMP_VERSION "\nTo support this application visit:\nhttps://buymeacoffee.com/boingball\n-----\nMade with decoders from\nHelix MP3 / AAC\nby Real Networks\nlibfoxenflac\nby astoeckel\n\nESP8266Audio\nby earlephilhower\n-----\nAI Used\nClaude and Codex\nLate Nights\nMany";
-				es.es_GadgetFormat = (UBYTE *)"OK";
-				EasyRequest(app->win, &es, NULL, TAG_DONE);
+				ShowAbout(app);
 			}
+			else if (mn == MENUNUM_PROJECT && it == 4)
+				mint_interface_preferences(app->win);
+#ifdef MINTAMP_SKIN
+			else if (mn == MENUNUM_PROJECT && it == ITEMNUM_CLASSIC) {
+				if (gSkinPlayer) MrSkinToClassic(app); else MrClassicToSkin(app);
+				SyncMenuChecks(app);
+				break;
+			}
+#endif
 			else if (mn == MENUNUM_PROJECT && it == ITEMNUM_RADIO)
 				OpenRadioWindow(app);
 			else if (mn == MENUNUM_PROJECT && it == ITEMNUM_ICONIFY)
@@ -7340,8 +7470,13 @@ static void MrOpenStartupArg(MrApp *app, int argc, char **argv)
 {
 	char path[MR_MAX_PATH];
 	path[0] = '\0';
+#ifdef MINTAMP_SKIN
+	if (argc > 0 && skin_player_audio_arg(argc, argv)) {
+		SafeCopy(path, sizeof(path), skin_player_audio_arg(argc, argv));
+#else
 	if (argc >= 2 && argv[1] && argv[1][0] && argv[1][0] != '-') {
 		SafeCopy(path, sizeof(path), argv[1]);
+#endif
 	} else if (argc == 0 && argv) {
 		struct WBStartup *wb = (struct WBStartup *)argv;
 		if (wb->sm_NumArgs >= 2 && wb->sm_ArgList[1].wa_Lock &&
@@ -7351,6 +7486,9 @@ static void MrOpenStartupArg(MrApp *app, int argc, char **argv)
 	}
 	if (!path[0])
 		return;
+#ifdef MINTAMP_SKIN
+	if (skin_player_is_skin(path)) return;
+#endif
 	if (MrIsPlaylistFile(path)) {
 		char drawer[MR_MAX_PATH];
 		CopyDrawerFromPath(drawer, sizeof(drawer), path);
@@ -7366,6 +7504,10 @@ static void MrOpenStartupArg(MrApp *app, int argc, char **argv)
 		StartPlayback(app);
 	}
 }
+
+#ifdef MINTAMP_SKIN
+#include "skin_reaction.inc"
+#endif
 
 static int MrMainReal(int argc, char **argv)
 {
@@ -7460,6 +7602,13 @@ static int MrMainReal(int argc, char **argv)
 		return 1;
 	}
 
+#ifdef MINTAMP_SKIN
+	gSkinArgc=argc; gSkinArgv=argv;
+	if (mint_interface_start_skinned(argc,argv))
+		gSkinPlayer=skin_player_open("MintAMP-SR",argc,argv);
+	else
+		skin_player_restore_audio("MintAMP-SR");
+#endif
 	if (!MrOpenWindow(&app)) {
 		SyncFromGadgets(&app);
 		SaveSettings(&app);
@@ -7493,6 +7642,9 @@ static int MrMainReal(int argc, char **argv)
 	DrawArtPanel(&app);
 
 	MrOpenStartupArg(&app, argc, argv);
+#ifdef MINTAMP_SKIN
+	if (gSkinPlayer) MrSkinUpdate(&app,0);
+#endif
 
 	MR_TASK_IDENTITY("gui-event-loop");
 	while (!done) {
@@ -7503,7 +7655,12 @@ static int MrMainReal(int argc, char **argv)
 			GetAttr(WINDOW_SigMask, app.plWinObj, &plSig);
 		if (app.rbWinObj)
 			GetAttr(WINDOW_SigMask, app.rbWinObj, &rbSig);
+#ifdef MINTAMP_SKIN
+		GetAttr(WINDOW_SigMask, app.winObj, &winSig);
+		sigs = Wait(skin_player_signal(gSkinPlayer) | winSig | appSig | timerSig | doneSig | plSig | rbSig |
+#else
 		sigs = Wait(winSig | appSig | timerSig | doneSig | plSig | rbSig |
+#endif
 			SIGBREAKF_CTRL_C);
 
 		if (sigs & SIGBREAKF_CTRL_C)
@@ -7511,6 +7668,9 @@ static int MrMainReal(int argc, char **argv)
 
 		if (sigs & doneSig)
 			HandleDoneSignal(&app);
+#ifdef MINTAMP_SKIN
+		MrSkinPoll(&app,&done);
+#endif
 
 		if (sigs & timerSig) {
 			struct Message *tmsg;
@@ -7534,6 +7694,9 @@ static int MrMainReal(int argc, char **argv)
 			while ((result = RA_HandleInput(app.winObj, &code)) != WMHI_LASTMSG) {
 				switch (result & WMHI_CLASSMASK) {
 				case WMHI_CLOSEWINDOW:
+#ifdef MINTAMP_SKIN
+					if (gSkinPlayer) MrSkinHideSettings(&app); else
+#endif
 					done = 1;
 					break;
 				case WMHI_ICONIFY:
@@ -7609,6 +7772,9 @@ static int MrMainReal(int argc, char **argv)
 			 * metadata gadgets continuously. */
 			UpdateAlbumHover(&app);
 		}
+#ifdef MINTAMP_SKIN
+		MrSkinUpdate(&app,(sigs & timerSig)!=0);
+#endif
 	}
 
 	/* Ordered, idempotent app-close teardown. Only proceed to dispose the
@@ -7632,8 +7798,13 @@ static int MrMainReal(int argc, char **argv)
 		return 0;
 	}
 
+#ifdef MINTAMP_SKIN
+	skin_player_close(gSkinPlayer); gSkinPlayer=NULL;
+	skin_player_shutdown();
+#endif
 	SyncFromGadgets(&app);
 	SaveSettings(&app);
+	mint_interface_flush();
 	RADIO_DBG(printf("app-close: SaveSettings done\n");)
 	DrainGuiPorts(&app, "before dispose");
 	DisposeGuiObjectsBeforeCloseLibs(&app);

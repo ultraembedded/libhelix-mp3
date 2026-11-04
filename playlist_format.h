@@ -26,6 +26,21 @@
 
 /* Called once per entry, in playlist order; return 0 to stop early. */
 typedef int (*PlaylistEntryFn)(void *ctx, const char *location, const char *title);
+/* Optional metadata delivered immediately after its entry callback. Unknown
+ * or invalid durations are -1; bounded to seven days per entry. */
+typedef void (*PlaylistDurationFn)(void *ctx,int seconds);
+static int playlist_duration(const char *text,size_t len)
+{
+    int seconds=0; size_t i=0;
+    while (i<len && (text[i]==' ' || text[i]=='\t')) ++i;
+    if (i==len || text[i]<'0' || text[i]>'9') return -1;
+    while (i<len && text[i]>='0' && text[i]<='9') {
+        if (seconds>604800/10) return -1;
+        seconds=seconds*10+text[i++]-'0'; if (seconds>604800) return -1;
+    }
+    while (i<len && (text[i]==' ' || text[i]=='\t')) ++i;
+    return i==len ? seconds : -1;
+}
 
 static int playlist_ascii_starts_nocase(const char *s, size_t len, const char *prefix)
 {
@@ -86,13 +101,14 @@ static const char *playlist_next_line(const char *text, size_t len, size_t *pos,
     return text + start;
 }
 
-static int playlist_parse_pls(const char *text, size_t len, PlaylistEntryFn fn, void *ctx)
+static int playlist_parse_pls(const char *text, size_t len, PlaylistEntryFn fn, void *ctx,PlaylistDurationFn duration)
 {
     /* Static: kept off the small GUI task stack; parsing is never nested. */
     static const char *file[PLAYLIST_PLS_MAX_ENTRIES + 1];
     static size_t fileLen[PLAYLIST_PLS_MAX_ENTRIES + 1];
     static const char *title[PLAYLIST_PLS_MAX_ENTRIES + 1];
     static size_t titleLen[PLAYLIST_PLS_MAX_ENTRIES + 1];
+    static int lengths[PLAYLIST_PLS_MAX_ENTRIES + 1];
     char location[PLAYLIST_LOCATION_MAX];
     char name[PLAYLIST_TITLE_MAX];
     const char *line;
@@ -101,19 +117,22 @@ static int playlist_parse_pls(const char *text, size_t len, PlaylistEntryFn fn, 
 
     memset(file, 0, sizeof(file));
     memset(title, 0, sizeof(title));
+    for (n=0;n<=PLAYLIST_PLS_MAX_ENTRIES;++n) lengths[n]=-1;
     while ((line = playlist_next_line(text, len, &pos, &lineLen)) != NULL) {
         int isFile = playlist_ascii_starts_nocase(line, lineLen, "File");
         int isTitle = playlist_ascii_starts_nocase(line, lineLen, "Title");
+        int isLength = playlist_ascii_starts_nocase(line,lineLen,"Length");
         size_t k;
-        if (!isFile && !isTitle) continue;
-        k = isFile ? 4 : 5;
+        if (!isFile && !isTitle && !isLength) continue;
+        k = isFile ? 4 : isTitle ? 5 : 6;
         n = 0;
         while (k < lineLen && line[k] >= '0' && line[k] <= '9' && n <= PLAYLIST_PLS_MAX_ENTRIES)
             n = n * 10 + (line[k++] - '0');
         if (n < 1 || n > PLAYLIST_PLS_MAX_ENTRIES || k >= lineLen || line[k] != '=') continue;
         k++;
         if (isFile) { file[n] = line + k; fileLen[n] = lineLen - k; if (n > maxN) maxN = n; }
-        else { title[n] = line + k; titleLen[n] = lineLen - k; }
+        else if (isTitle) { title[n] = line + k; titleLen[n] = lineLen - k; }
+        else lengths[n]=playlist_duration(line+k,lineLen-k);
     }
     for (n = 1; n <= maxN; n++) {
         if (!file[n]) continue;
@@ -122,18 +141,20 @@ static int playlist_parse_pls(const char *text, size_t len, PlaylistEntryFn fn, 
         name[0] = '\0';
         if (title[n]) playlist_copy_trimmed(name, sizeof(name), title[n], titleLen[n]);
         count++;
-        if (!fn(ctx, location, name)) break;
+        { int proceed=fn(ctx,location,name);
+          if (duration) duration(ctx,lengths[n]);
+          if (!proceed) break; }
     }
     return count;
 }
 
-static int playlist_parse_m3u(const char *text, size_t len, PlaylistEntryFn fn, void *ctx)
+static int playlist_parse_m3u(const char *text, size_t len, PlaylistEntryFn fn, void *ctx,PlaylistDurationFn duration)
 {
     char location[PLAYLIST_LOCATION_MAX];
     char name[PLAYLIST_TITLE_MAX];
     const char *line;
     size_t pos = 0, lineLen;
-    int count = 0;
+    int count = 0,seconds=-1;
 
     name[0] = '\0';
     while ((line = playlist_next_line(text, len, &pos, &lineLen)) != NULL) {
@@ -144,12 +165,16 @@ static int playlist_parse_m3u(const char *text, size_t len, PlaylistEntryFn fn, 
             if (playlist_ascii_starts_nocase(location, strlen(location), "#EXTINF:")) {
                 const char *comma = strchr(location, ',');
                 name[0] = '\0';
+                seconds=comma ? playlist_duration(location+8,(size_t)(comma-location-8)) : -1;
                 if (comma) playlist_copy_trimmed(name, sizeof(name), comma + 1, strlen(comma + 1));
             }
             continue;
         }
         count++;
-        if (!fn(ctx, location, name)) break;
+        { int proceed=fn(ctx,location,name);
+          if (duration) duration(ctx,seconds);
+          if (!proceed) break; }
+        seconds=-1;
         name[0] = '\0';
     }
     return count;
@@ -157,7 +182,7 @@ static int playlist_parse_m3u(const char *text, size_t len, PlaylistEntryFn fn, 
 
 /* Parses an M3U/M3U8 or PLS playlist held in text[0..len), telling the two
  * apart by content. Returns the number of entries passed to fn. */
-static int playlist_parse(const char *text, size_t len, PlaylistEntryFn fn, void *ctx)
+static int playlist_parse_ex(const char *text, size_t len, PlaylistEntryFn fn, void *ctx,PlaylistDurationFn duration)
 {
     const char *line;
     size_t pos = 0, lineLen;
@@ -173,11 +198,14 @@ static int playlist_parse(const char *text, size_t len, PlaylistEntryFn fn, void
         while (k < lineLen && (line[k] == ' ' || line[k] == '\t')) k++;
         if (k == lineLen) continue;
         if (playlist_ascii_starts_nocase(line + k, lineLen - k, "[playlist]"))
-            return playlist_parse_pls(text, len, fn, ctx);
+            return playlist_parse_pls(text, len, fn, ctx,duration);
         break;
     }
-    return playlist_parse_m3u(text, len, fn, ctx);
+    return playlist_parse_m3u(text, len, fn, ctx,duration);
 }
+
+static int playlist_parse(const char *text,size_t len,PlaylistEntryFn fn,void *ctx)
+{ return playlist_parse_ex(text,len,fn,ctx,NULL); }
 
 /* Writers: each formats one piece of the file into out (always
  * NUL-terminated) and returns its length, or 0 if it does not fit. A file is
@@ -199,25 +227,28 @@ static size_t playlist_write_header(char *out, size_t outSize, int format)
 
 /* Line breaks inside a title would start a bogus entry; titles here come
  * from station names and file names, so they are simply cut there. */
-static size_t playlist_write_entry(char *out, size_t outSize, int format, int number,
-                                   const char *location, const char *title)
+static size_t playlist_write_entry_ex(char *out, size_t outSize, int format, int number,
+                                   const char *location, const char *title,int seconds)
 {
     char safeTitle[PLAYLIST_TITLE_MAX];
+    if (seconds<0 || seconds>604800) seconds=-1;
 
     playlist_copy_trimmed(safeTitle, sizeof(safeTitle), title ? title : "",
         title ? strcspn(title, "\r\n") : 0);
     if (format == PLAYLIST_FORMAT_PLS) {
         if (safeTitle[0])
             return playlist_fit(out, outSize, snprintf(out, outSize,
-                "File%d=%s\nTitle%d=%s\nLength%d=-1\n", number, location, number, safeTitle, number));
+                "File%d=%s\nTitle%d=%s\nLength%d=%d\n", number, location, number, safeTitle, number,seconds));
         return playlist_fit(out, outSize, snprintf(out, outSize,
-            "File%d=%s\nLength%d=-1\n", number, location, number));
+            "File%d=%s\nLength%d=%d\n", number, location, number,seconds));
     }
-    if (safeTitle[0])
-        return playlist_fit(out, outSize, snprintf(out, outSize, "#EXTINF:-1,%s\n%s\n", safeTitle, location));
+    if (safeTitle[0] || seconds>=0)
+        return playlist_fit(out, outSize, snprintf(out, outSize, "#EXTINF:%d,%s\n%s\n", seconds,safeTitle, location));
     return playlist_fit(out, outSize, snprintf(out, outSize, "%s\n", location));
 }
 
+static size_t playlist_write_entry(char *out,size_t size,int format,int number,const char *location,const char *title)
+{ return playlist_write_entry_ex(out,size,format,number,location,title,-1); }
 static size_t playlist_write_footer(char *out, size_t outSize, int format, int count)
 {
     if (format != PLAYLIST_FORMAT_PLS) {

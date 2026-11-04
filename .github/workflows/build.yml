@@ -46,6 +46,9 @@ jobs:
       - name: Check ICY RadioInfo metadata handling
         run: make -f Makefile.amiga radio-metadata-test
 
+      - name: Check GadTools radio window screen bounds
+        run: make -f Makefile.amiga gadtools-radio-layout-test
+
       - name: Check Ogg FLAC radio stream conversion
         run: make -f Makefile.amiga radio-oggflac-test
 
@@ -58,6 +61,20 @@ jobs:
       - name: Check the libnix ___free_all head finder
         run: make -f Makefile.amiga freeall-heads-test
 
+      - name: Check classic Winamp skin loading and rendering
+        run: |
+          make -f Makefile.amiga skin-format-test
+          ./skin_format_test Skins/MintAMP-mintleaf.wsz
+
+      - name: Check launcher selection, Workbench icon and bounded visual workload
+        run: make -f Makefile.amiga launcher-test interface-prefs-test skin-performance-test skin-sprite-test
+
+      - name: Check shared skin controls and MP3 equaliser bypass
+        run: make -f Makefile.amiga skin-controls-test skin-eq-decode-test
+
+      - name: Check integer-only timing and diagnostics
+        run: make -f Makefile.amiga integer-stats-test
+
       - name: Compile with the Amiga cross-compiler
         env:
           CPU: ${{ matrix.cpu }}
@@ -67,11 +84,12 @@ jobs:
             -e CPU -e ASM60_GROUPS \
             -v "$PWD":/src -w /src \
             amigadev/crosstools:m68k-amigaos \
-            bash -c 'make -f Makefile.amiga fast030 CPU="$CPU" ASM60_GROUPS="$ASM60_GROUPS"'
+            bash -c 'make -f Makefile.amiga release RADIO=1 CPU="$CPU" ASM60_GROUPS="$ASM60_GROUPS"'
 
       - name: Confirm the player and decoder modules were produced
         run: |
-          ls -la amiga_mp3dec.fastexp
+          ls -la amiga_mp3dec.fastexp MintAMP MintAMP-GT MintAMP-SGT MintAMP-SR MintAMP-Launch
+          ls -la Skins/MintAMP-mintleaf.wsz
           ls -la decoders/{aac,flac,ogg,wma,wav,iff}.decoder
           file amiga_mp3dec.fastexp || true
 
@@ -80,6 +98,7 @@ jobs:
         with:
           name: MintAMP-${{ matrix.label }}-AmigaOS
           path: |
-            amiga_mp3dec.fastexp
-            decoders/*.decoder
+            release/MintAMP-2.0-dev-680${{ matrix.cpu }}/**
+            release/MintAMP-2.0-dev-680${{ matrix.cpu }}.info
+            release/MintAMP.readme
           if-no-files-found: error

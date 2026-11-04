@@ -1,44 +1,59 @@
-MintAMP v1.4.0 release build recipe
-===================================
+MintAMP 2.0 development build recipe (PR #521)
+=============================================
 
-These are the release commands used for MintAMP v1.4.0.
-Run them from the MintAMP repository root.
+Work only on codex/winamp-skin-frontends, targeting 2.0. These commands create
+local development drawers. They do not publish, tag, merge or update 1.4.0.
+Run from the repository root with the Amiga cross-compiler tools on PATH.
 
-68030 release
--------------
+Run the automated checks first:
 
-make -f Makefile.amiga release-clean
-make -f Makefile.amiga clean
+make -f Makefile.amiga launcher-test interface-prefs-test skin-format-test skin-controls-test \
+  skin-eq-decode-test skin-performance-test skin-sprite-test integer-stats-test \
+  gadtools-radio-layout-test playlist-format-test radio-metadata-test \
+  radio-oggflac-test radio-favourites-test display-text-test freeall-heads-test \
+  aac-mulshift60-ref-test ogg-mulshift60-ref-test wma-mulshift-ref-test \
+  flac-lpc-ref-test mpeg25-decode-test
 
-make -f Makefile.amiga release \
-  CPU=30 \
-  RADIO=1 \
-  SSL=1 \
-  SSLCERTS=1 \
-  RELEASE_NAME=MintAMP-v1.4.0-68030
-
-68060 release
--------------
+68030 drawer (68030/68040 and compatible accelerated systems)
+-----------------------------------------------------------
 
 make -f Makefile.amiga clean
+make -f Makefile.amiga release CPU=30 RADIO=1 SSL=1 SSLCERTS=1 \
+  RELEASE_NAME=MintAMP-2.0-dev-68030
 
-make -f Makefile.amiga release \
-  CPU=60 \
+68060 drawer (including FPU-less 68060)
+------------------------------------
+
+make -f Makefile.amiga clean
+make -f Makefile.amiga release CPU=60 \
   ASM60_GROUPS="lowrate060 huffman midside planars8" \
-  RADIO=1 \
-  SSL=1 \
-  SSLCERTS=1 \
-  RELEASE_NAME=MintAMP-v1.4.0-68060
+  RADIO=1 SSL=1 SSLCERTS=1 RELEASE_NAME=MintAMP-2.0-dev-68060
 
-Notes
------
+Always clean when changing CPU, compiler or optimisation options. The second
+clean leaves the first packaged drawer intact. Do not mix decoder modules
+between CPU drawers. release-clean removes all packaged drawers; use only at
+the start if you intend to discard previous local packages.
 
-- The 68030 build uses the established 68020/68030/68040 assembly path.
-- The 68060 build deliberately does not inherit the full 68030 assembly bundle.
-- The v1.4.0 68060 release uses: lowrate060 huffman midside planars8.
-- AAC, FLAC, Ogg and WMA decoder math selects its own CPU-safe implementation.
-- RADIO=1 enables internet radio support.
-- SSL=1 enables HTTPS through AmiSSL.
-- SSLCERTS=1 enables TLS certificate and hostname verification.
-- TASKSAFEMALLOC is enabled by default in normal builds; do not disable it for releases.
-- release-clean removes previous release drawers before starting a fresh release build.
+Each drawer includes MintAMP-Launch and its icon, the four existing frontends
+and their legacy icons, amiga_mp3dec.fastexp, CPU-matched AAC/FLAC/Ogg/WMA/WAV/IFF
+modules, Skins/MintAMP-mintleaf.wsz, ArtCache and documentation. Start with
+MintAMP-Launch: the mint-leaf skin opens first (ReAction framework). Right-click
+the skin, MintAMP > Classic interface, to flip the running player to the
+classic window; untick Project > Classic interface there to flip back. Use
+Interface preferences in any frontend (or MintAMP-Launch --prefs) for the
+next-launch framework and appearance.
+
+RADIO=1 enables radio; SSL=1 enables AmiSSL; SSLCERTS=1 enables certificate
+and hostname verification. AmiSSL runtime and root certificates must be
+installed. Keep task-safe allocation and exact-binary free-all validation.
+The established 68030 assembly path and the explicit 68060 assembly group
+are unchanged. Never inherit the complete 68030 bundle in a 68060 build.
+
+EXTRA_CFLAGS=-msoft-float is available for additional application compilation
+checks. The application integer-source guard does not prove that all external
+libraries are FPU-free. Test the installed OS libraries and CPU-matched decoder
+modules on the actual FPU-less board. See docs/mintamp-2.0-acceptance.md.
+
+GitHub Actions compiles both CPUs and uploads development drawers. Host CPU
+measurements and successful cross-compilation do not establish Amiga playback
+headroom. Real audio.device/Intuition tests are required before a 2.0 release.

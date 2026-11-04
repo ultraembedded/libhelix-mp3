@@ -19,7 +19,8 @@ release:
 	@# WORD at byte offset 84 (DiskObject header 78 + 6 bytes into DrawerData).
 	@# The shared MintAMP drawer artwork is snapped at 265x64; keep its saved
 	@# X/Y position and width, but make the packaged drawer 120 px high.
-	@if [ -f release/MintAMP.info ]; then \
-		printf '\000\170' | dd of=release/MintAMP.info bs=1 seek=84 conv=notrunc 2>/dev/null; \
-		echo "Set drawer window height to 120: release/MintAMP.info"; \
-	fi
+	@for icon in release/MintAMP-2.0-dev-680*.info; do \
+		if [ -f "$$icon" ]; then \
+			printf '\000\170' | dd of="$$icon" bs=1 seek=84 conv=notrunc 2>/dev/null; \
+		fi; \
+	done

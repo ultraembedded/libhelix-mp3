@@ -1,3 +1,6 @@
+#ifdef MINTAMP_SKIN
+#include "../skin_controls.h"
+#endif
 /* ***** BEGIN LICENSE BLOCK ***** 
  * Version: RCSL 1.0/RPSL 1.0 
  *  
@@ -1907,6 +1910,13 @@ int IMDCT(MP3DecInfo *mp3DecInfo, int gr, int ch)
 		antialiasNBfly = activeSubbandsForAntiAlias;
 
 	AntiAlias(hi->huffDecBuf[ch], antialiasNBfly);
+#ifdef MINTAMP_SKIN
+    if (skin_eq_apply(hi->huffDecBuf[ch],MAX_NSAMP,mp3DecInfo->samprate)) {
+        int k,mask=0;
+        for (k=0;k<MAX_NSAMP;++k) mask|=FASTABS(hi->huffDecBuf[ch][k]);
+        hi->gb[ch]=CLZ(mask)-1;
+    }
+#endif
 	hi->nonZeroBound[ch] = MAX(hi->nonZeroBound[ch], (nBfly * 18) + 8);
 
 	ASSERT(hi->nonZeroBound[ch] <= MAX_NSAMP);

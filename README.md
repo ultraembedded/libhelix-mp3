@@ -32,6 +32,13 @@ MintAMP ships with ReAction/ClassAct, GadTools and command-line editions. Its fi
 - **CPU-aware decoders:** dedicated 68060-safe multiply and hot-loop paths avoid instructions that the 68060 handles through software emulation.
 - **Modular distribution:** matching AAC, FLAC, Ogg, WMA, WAV and IFF decoder modules are bundled with every release edition and CI artifact.
 
+MintAMP 2.0 opens with a classic Winamp-compatible skin and switches live to
+the classic MintAMP window with a ticked **Classic interface** menu item
+(**MintAMP-SR** for ReAction, **MintAMP-SGT** for GadTools, both started by
+**MintAMP-Launch**). See the
+[skin editions guide](docs/winamp-skins.md) for builds, skin selection and
+compatibility limits.
+
 ## Choose your edition
 
 | Installed CPU | Release drawer | Notes |

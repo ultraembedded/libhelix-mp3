@@ -6,3 +6,27 @@
 *.decoder
 *.fastexp
 *.exp
+
+/MintAMP
+/MintAMP-GT
+/MintAMP-SGT
+/MintAMP-SR
+/skin_format_test
+*.freeall-discovery
+*.freeall-heads
+
+skin_controls_test
+skin_eq_decode_test
+playlist_format_test
+integer_stats_test
+gadtools_radio_layout_test
+
+# MintAMP 2.0 development launcher and host diagnostics
+/MintAMP-Launch
+/launch_options_test
+/skin_performance_test
+/skin_sprite_test
+/interface_prefs_test
+
+# Packaged release drawers (make release)
+release/

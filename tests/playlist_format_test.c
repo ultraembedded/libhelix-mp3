@@ -9,6 +9,7 @@ typedef struct Collected {
     char location[8][PLAYLIST_LOCATION_MAX];
     char title[8][PLAYLIST_TITLE_MAX];
     int stopAfter;
+    int durations[8];
 } Collected;
 
 static int collect(void *ctx, const char *location, const char *title)
@@ -20,6 +21,9 @@ static int collect(void *ctx, const char *location, const char *title)
     c->count++;
     return c->stopAfter == 0 || c->count < c->stopAfter;
 }
+
+static void collect_duration(void *ctx,int seconds)
+{ Collected *c=(Collected *)ctx; assert(c->count>0); c->durations[c->count-1]=seconds; }
 
 static Collected parse(const char *text)
 {
@@ -38,6 +42,22 @@ int main(void)
     char file[4096];
     size_t len;
     int format;
+    const char *timed="#EXTM3U\n#EXTINF:123,First\na.mp3\n#EXTINF:-1,Stream\nhttp://x\n#EXTINF:99999999999999999,Bad\nb.mp3\nc.mp3\n";
+    memset(&c,0,sizeof(c));
+    assert(playlist_parse_ex(timed,strlen(timed),collect,&c,collect_duration)==4);
+    assert(c.durations[0]==123 && c.durations[1]==-1 && c.durations[2]==-1 && c.durations[3]==-1);
+    timed="[playlist]\nLength2=99\nFile2=b\nFile1=a\nLength1=0\nLength3=oops\nFile3=c\n";
+    memset(&c,0,sizeof(c)); assert(playlist_parse_ex(timed,strlen(timed),collect,&c,collect_duration)==3);
+    assert(c.durations[0]==0 && c.durations[1]==99 && c.durations[2]==-1);
+    for (format=0;format<=1;++format) {
+        len=playlist_write_header(file,sizeof(file),format);
+        len+=playlist_write_entry_ex(file+len,sizeof(file)-len,format,1,"a.mp3","",321);
+        len+=playlist_write_footer(file+len,sizeof(file)-len,format,1);
+        memset(&c,0,sizeof(c)); assert(playlist_parse_ex(file,len,collect,&c,collect_duration)==1);
+        assert(c.durations[0]==321);
+    }
+    assert(playlist_duration("604800",6)==604800 && playlist_duration("604801",6)==-1);
+    assert(playlist_duration("12foo",5)==-1);
 
     /* Shoutcast-style PLS: CRLF, keys in any order and case, gaps in N. */
     c = parse("[playlist]\r\nnumberofentries=3\r\nTitle2=Backup\r\nFile1=http://s6.reliastream.com:8008/stream\r\n"
