@@ -80,7 +80,9 @@ void MP3EnableFdct32HalfSparse16PreconditionCheck(int enabled)
  * already uses for all 32 rows. See README.amiga.md's "--rate 14700"
  * section for the full writeup; the safe win at this rate is the
  * dequant/IMDCT active-subbands cap (MP3FastLowrateEffectiveActiveSubbands),
- * not FDCT32 pruning.
+ * not FDCT32 pruning. FDCT32LowBands() does take the input-side saving:
+ * the capped upper bands are zero, so their reads, adds and zero-input
+ * multiplies in the first butterfly pass are skipped (bit-exact).
  */
 void FDCT32FastLowrate(int *x, int *d, int offset, int oddBlock, int gb,
 	int stride, int phase)
@@ -118,6 +120,10 @@ void FDCT32FastLowrate(int *x, int *d, int offset, int oddBlock, int gb,
 		FDCT32Quarter(x, d, offset, oddBlock, gb, phase, stride);
 		return;
 	}
+	/* Strides 3 and 5 (and 4 without the quarter transform) need every
+	 * row; FDCT32LowBands still skips the capped, all-zero upper bands. */
+	FDCT32LowBands(x, d, offset, oddBlock, gb);
+	return;
 #else
 	(void)stride;
 #endif

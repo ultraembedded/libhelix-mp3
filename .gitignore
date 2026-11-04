@@ -30,3 +30,9 @@ gadtools_radio_layout_test
 
 # Packaged release drawers (make release)
 release/
+fdct32_lowbands_test
+fdct32_lowbands_test60
+polyphase_stride3_reduced_test
+polyphase_stride3_reduced_test60
+mpeg25_decode_test
+fdct32_lowbands*.out

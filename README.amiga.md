@@ -489,6 +489,19 @@ for the selected output format.  For example, `RAM:` with `song.mp3` writes
   caps active subbands to the output bandwidth so skipped high-frequency
   IMDCT/overlap work is not generated merely to be discarded by the low-rate
   selector.
+- `--rate 14700` (stride 3) costs more than its sample count suggests: the
+  half/quarter DCT tricks need a power-of-two stride, so it runs the full
+  32-point FDCT32 for every subband block. Three things keep that affordable:
+  on 68060 builds (`AMIGA_M68K_POLYPHASE_68060`) every C DCT multiply uses
+  hardware-only 32-bit multiplies instead of a libgcc `___muldi3` call per
+  multiply (bit-identical); `FDCT32LowBands()` skips the reads, adds and
+  zero-input multiplies of the capped, all-zero upper subbands in the first
+  butterfly pass (bit-identical, used for strides 3 and 5 when no hand-written
+  68030 FDCT32 is linked); and with "Faster"/"Fast" quality the same
+  middle-eight-tap reduced dewindow used at 22050/11025 Hz replaces the full
+  16-tap filter (`PolyphaseMono/StereoFastLowrateStride3Reduced`). `make -f
+  Makefile.amiga fdct32-lowbands-test polyphase-stride3-reduced-test` checks
+  them on the host.
 - `--rate 14700` (stride 3) is a middle ground between 11025 Hz (stride 4)
   and 22050 Hz (stride 2). It has its own hand-unrolled C polyphase kernel
   (`PolyphaseMonoFastLowrateStride3`/`PolyphaseStereoFastLowrateStride3` in

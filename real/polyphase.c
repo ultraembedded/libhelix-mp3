@@ -1151,6 +1151,18 @@ static const unsigned char fastLowrateStride5Samples[5][7] = {
 
 static const unsigned char fastLowrateStride5Count[5] = { 7, 6, 6, 6, 7 };
 
+#if defined(AMIGA_FAST_REDUCED_TAPS)
+/* Every 3rd sample, phase p starting at (3 - p) % 3, in the same order as
+ * PolyphaseMonoFastLowrateStride3(). */
+static const unsigned char fastLowrateStride3Samples[3][11] = {
+	{ 0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30 },
+	{ 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 0 },
+	{ 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31 }
+};
+
+static const unsigned char fastLowrateStride3Count[3] = { 11, 10, 11 };
+#endif
+
 static int PolyphaseMonoFastLowrateCompact(short *pcm, int *vbuf,
 	const int *coefBase, const unsigned char *samples, int count)
 {
@@ -1258,6 +1270,21 @@ static int PolyphaseMonoFastLowrateStride4Reduced(short *pcm, int *vbuf,
 	while (remaining-- > 0)
 		*pcm++ = PolyphaseMonoFastCompactSampleReduced(*samples++, vbuf, coefBase);
 	return 8;
+}
+
+/* 14700 Hz from 44.1 kHz: the same middle-eight-tap dewindow as 22050/11025,
+ * halving the per-sample filter work for "Faster"/"Fast" quality. */
+static int PolyphaseMonoFastLowrateStride3Reduced(short *pcm, int *vbuf,
+	const int *coefBase, int phase)
+{
+	const unsigned char *samples;
+	int count, remaining;
+
+	samples = fastLowrateStride3Samples[phase];
+	count = remaining = fastLowrateStride3Count[phase];
+	while (remaining-- > 0)
+		*pcm++ = PolyphaseMonoFastCompactSampleReduced(*samples++, vbuf, coefBase);
+	return count;
 }
 #endif
 
@@ -1491,6 +1518,21 @@ static int PolyphaseStereoFastLowrateStride4Reduced(short *pcm, int *vbuf,
 		pcm += 2;
 	}
 	return 16;
+}
+
+static int PolyphaseStereoFastLowrateStride3Reduced(short *pcm, int *vbuf,
+	const int *coefBase, int phase)
+{
+	const unsigned char *samples;
+	int count, remaining;
+
+	samples = fastLowrateStride3Samples[phase];
+	count = remaining = fastLowrateStride3Count[phase];
+	while (remaining-- > 0) {
+		PolyphaseStereoFastCompactSampleReduced(pcm, *samples++, vbuf, coefBase);
+		pcm += 2;
+	}
+	return count * 2;
 }
 #endif
 
@@ -2233,6 +2275,11 @@ int PolyphaseMonoFastLowrate(short *pcm, int *vbuf, const int *coefBase, int str
 	}
 	if (stride == 3) {
 		*phase = PolyphaseAdvanceLowratePhase(localPhase, stride);
+#if defined(AMIGA_FAST_REDUCED_TAPS)
+		if (MP3ExperimentalReducedTapsEnabled())
+			return PolyphaseMonoFastLowrateStride3Reduced(pcm, vbuf, coefBase,
+				localPhase);
+#endif
 #if defined(AMIGA_M68K_ASM_POLYPHASE)
 		if (MonoFastPolyphaseStride3_Amiga_m68k_IsActive()) {
 			switch (localPhase) {
@@ -2373,6 +2420,11 @@ int PolyphaseStereoFastLowrate(short *pcm, int *vbuf, const int *coefBase, int s
 	}
 	if (stride == 3) {
 		*phase = PolyphaseAdvanceLowratePhase(localPhase, stride);
+#if defined(AMIGA_FAST_REDUCED_TAPS)
+		if (MP3ExperimentalReducedTapsEnabled())
+			return PolyphaseStereoFastLowrateStride3Reduced(pcm, vbuf, coefBase,
+				localPhase);
+#endif
 #if defined(AMIGA_M68K_ASM_POLYPHASE)
 		if (StereoFastPolyphaseStride3_Amiga_m68k_IsActive()) {
 			switch (localPhase) {

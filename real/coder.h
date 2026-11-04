@@ -148,6 +148,7 @@
 #define FDCT32				STATNAME(FDCT32)
 #define FDCT32Half			STATNAME(FDCT32Half)
 #define FDCT32HalfSparse16		STATNAME(FDCT32HalfSparse16)
+#define FDCT32LowBands			STATNAME(FDCT32LowBands)
 #define FDCT32Quarter			STATNAME(FDCT32Quarter)
 #define FDCT32_C_REFERENCE	STATNAME(FDCT32_C_REFERENCE)
 #define FDCT32_HAS_AMIGA_M68K_ASM_RUNTIME STATNAME(FDCT32_HAS_AMIGA_M68K_ASM_RUNTIME)
@@ -448,6 +449,7 @@ int IntensityScaleRun_HAS_AMIGA_M68K_ASM_RUNTIME(void);
 void FDCT32(int *x, int *d, int offset, int oddBlock, int gb);
 void FDCT32Half(int *x, int *d, int offset, int oddBlock, int gb);
 void FDCT32HalfSparse16(int *x, int *d, int offset, int oddBlock, int gb);
+void FDCT32LowBands(int *x, int *d, int offset, int oddBlock, int gb);
 void FDCT32Quarter(int *x, int *d, int offset, int oddBlock, int gb, int phase, int stride);
 void FDCT32FastLowrate(int *x, int *d, int offset, int oddBlock, int gb,
 	int stride, int phase);
