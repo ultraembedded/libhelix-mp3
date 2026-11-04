@@ -37,8 +37,11 @@ the start if you intend to discard previous local packages.
 Each drawer includes MintAMP-Launch and its icon, the four existing frontends
 and their legacy icons, amiga_mp3dec.fastexp, CPU-matched AAC/FLAC/Ogg/WMA/WAV/IFF
 modules, Skins/MintAMP-mintleaf.wsz, ArtCache and documentation. Start with
-MintAMP-Launch. Native ReAction is the default; use Interface preferences in
-any frontend (or MintAMP-Launch --prefs) for the next-launch interface.
+MintAMP-Launch: the mint-leaf skin opens first (ReAction framework). Right-click
+the skin, MintAMP > Classic interface, to flip the running player to the
+classic window; untick Project > Classic interface there to flip back. Use
+Interface preferences in any frontend (or MintAMP-Launch --prefs) for the
+next-launch framework and appearance.
 
 RADIO=1 enables radio; SSL=1 enables AmiSSL; SSLCERTS=1 enables certificate
 and hostname verification. AmiSSL runtime and root certificates must be
