@@ -9944,6 +9944,8 @@ static int GuiMainReal(int argc, char **argv)
 		ULONG rbMask = gui.rbWin ? (1UL << gui.rbWin->UserPort->mp_SigBit) : 0;
 #ifdef MINTAMP_SKIN
 		ULONG skinMask=skin_player_signal(gSkinPlayer);
+		/* Captured before HandleTimerSignal() rearms the timer. */
+		int skinArtTimer=gui.timerIsArt, skinArtActive=gui.artDecode.active;
 #else
 		ULONG skinMask=0;
 #endif
@@ -9965,7 +9967,17 @@ static int GuiMainReal(int argc, char **argv)
 		HandlePlaylistPoll(&gui);
 		HandleRadioWindow(&gui);
 #ifdef MINTAMP_SKIN
-		GuiSkinUpdate(&gui,timerMask && (sigs & timerMask) && !gui.timerIsArt);
+		/* Refresh the skin only when something can have changed: a skin
+		 * event, another window/port, the one-second tick or finished
+		 * artwork. Skin drags and the 20 ms artwork decode timer otherwise
+		 * woke a full refresh, taking CPU from the equal-priority decoder. */
+		{
+			int skinTick=timerMask && (sigs & timerMask) && !skinArtTimer;
+			if (gSkinEvents || (sigs & ~(skinMask | timerMask)) || skinTick ||
+				skinArtActive != gui.artDecode.active)
+				GuiSkinUpdate(&gui,skinTick);
+			gSkinEvents=0;
+		}
 #endif
 	}
 	if (gui.playbackActive)

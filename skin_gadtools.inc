@@ -255,10 +255,13 @@ static void GuiSkinSettings(HelixAmp3Gui *gui)
     if (gui->win) GuiSkinHideSettings(gui);
     else GuiRestoreFromAppIcon(gui);
 }
+/* Skin events handled since the main loop last refreshed the skin. */
+static int gSkinEvents;
 static void GuiSkinPoll(HelixAmp3Gui *gui)
 {
     SkinEvent e;
     while (skin_player_poll(gSkinPlayer,&e)) {
+        ++gSkinEvents;
         struct Gadget gad;
         memset(&gad,0,sizeof(gad));
         switch (e.action) {
@@ -368,11 +371,11 @@ static void GuiSkinPoll(HelixAmp3Gui *gui)
     }
     if (!gui->closeRequested && gSkinPendingPlay && gSkinPlayer && !gui->playbackActive && !gui->playbackDonePending) {
         struct Gadget gad;
-        gSkinPendingPlay=0; memset(&gad,0,sizeof(gad));
+        gSkinPendingPlay=0; ++gSkinEvents; memset(&gad,0,sizeof(gad));
         gad.GadgetID=GID_PLAY; HandleGuiAction(gui,&gad,0,IDCMP_GADGETUP,TRUE);
     }
     if (!gui->closeRequested && gSkinPendingTrack>=0 && !gui->playbackActive && !gui->playbackDonePending) {
-        int index=gSkinPendingTrack; gSkinPendingTrack=-1;
+        int index=gSkinPendingTrack; gSkinPendingTrack=-1; ++gSkinEvents;
         if (index<gui->playlist.count) { PlaylistLoadAndShow(gui,index); PlaylistStartCurrent(gui); }
     }
 }
@@ -403,7 +406,6 @@ static void GuiSkinUpdate(HelixAmp3Gui *gui,int tick)
     state.mono=gSkinAudio.channels==1; state.rate=gGuiPlaybackStatus.sampleRate;
     state.bitrate=gSkinAudio.bitrate ? gSkinAudio.bitrate : gGuiPlaybackStatus.radioBitrateKbps;
     state.filter=gui->hardwareFilter;
-    snprintf(state.debug_text,sizeof(state.debug_text),"BUF %luMS SPARE %ldMS UNDERRUN %lu",gGuiPlaybackStatus.halfBufferMs,gGuiPlaybackStatus.spareMs,gGuiPlaybackStatus.underruns);
     skin_player_update(gSkinPlayer,&state,tick);
     GuiSkinPlaylistUpdate(gui);
     skin_player_artwork_enabled(gSkinPlayer,gui->artEnabled);

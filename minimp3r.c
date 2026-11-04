@@ -801,6 +801,7 @@ typedef struct MrApp {
 	unsigned long playbackRunId;
 	int   playbackActive;
 	int   playbackDonePending;
+	int   settingsSavePending;
 	MrStreamState streamState;
 	char  currentStreamUrl[MR_MAX_PATH];
 	char  queuedStreamUrl[MR_MAX_PATH];
@@ -1252,8 +1253,9 @@ static void LoadSettings(MrApp *app)
 	LoadRadioFavourites(app);
 }
 
-static void SaveSettings(MrApp *app)
+static void SaveSettingsNow(MrApp *app)
 {
+	app->settingsSavePending = 0;
 	SaveEnvInt("FastLowrate", app->fastLowrate);
 	SaveEnvInt("SuperfastLowrate", app->superfastLowrate);
 	SaveEnvInt("Ultrafast", app->ultrafast);
@@ -1279,6 +1281,18 @@ static void SaveSettings(MrApp *app)
 	SaveEnvInt("ProgressBar", app->progressEnabled);
 	SaveEnvString("LastDrawer", app->lastDrawer);
 	SaveRadioFavourites(app);
+}
+
+/* Settings go to ENVARC: on disk. As in the GadTools frontend, keep those
+ * writes out of a live decoder's CPU/IO budget: the next status poll after
+ * playback ends (or a clean exit) saves the latest values. */
+static void SaveSettings(MrApp *app)
+{
+	if (app->playbackActive || app->playbackDonePending) {
+		app->settingsSavePending = 1;
+		return;
+	}
+	SaveSettingsNow(app);
 }
 
 /* Sets one gadget attribute.  While iconified there is no window, but the
@@ -2286,6 +2300,8 @@ static void HandleDoneSignal(MrApp *app)
 static void PollPlaybackStatus(MrApp *app)
 {
 	int phase;
+	if (app->settingsSavePending && !app->playbackActive && !app->playbackDonePending)
+		SaveSettingsNow(app);
 	unsigned long frames;
 	int rate;
 	long spareMs;
@@ -7611,7 +7627,7 @@ static int MrMainReal(int argc, char **argv)
 #endif
 	if (!MrOpenWindow(&app)) {
 		SyncFromGadgets(&app);
-		SaveSettings(&app);
+		SaveSettingsNow(&app);
 		MrCloseWindow(&app);
 		CloseTimer(&app);
 		DrainReplyMsgPortForClose(app.appPort, "open failure");
@@ -7651,13 +7667,17 @@ static int MrMainReal(int argc, char **argv)
 		ULONG plSig = 0;
 		ULONG rbSig = 0;
 		ULONG sigs;
+#ifdef MINTAMP_SKIN
+		ULONG skinSig;
+#endif
 		if (app.plWinObj)
 			GetAttr(WINDOW_SigMask, app.plWinObj, &plSig);
 		if (app.rbWinObj)
 			GetAttr(WINDOW_SigMask, app.rbWinObj, &rbSig);
 #ifdef MINTAMP_SKIN
 		GetAttr(WINDOW_SigMask, app.winObj, &winSig);
-		sigs = Wait(skin_player_signal(gSkinPlayer) | winSig | appSig | timerSig | doneSig | plSig | rbSig |
+		skinSig = skin_player_signal(gSkinPlayer);
+		sigs = Wait(skinSig | winSig | appSig | timerSig | doneSig | plSig | rbSig |
 #else
 		sigs = Wait(winSig | appSig | timerSig | doneSig | plSig | rbSig |
 #endif
@@ -7773,7 +7793,11 @@ static int MrMainReal(int argc, char **argv)
 			UpdateAlbumHover(&app);
 		}
 #ifdef MINTAMP_SKIN
-		MrSkinUpdate(&app,(sigs & timerSig)!=0);
+		/* Skip the refresh for wakeups that were only skin pointer/drag
+		 * traffic with no event: the decoder shares this priority. */
+		if (gSkinEvents || (sigs & ~skinSig))
+			MrSkinUpdate(&app,(sigs & timerSig)!=0);
+		gSkinEvents=0;
 #endif
 	}
 
@@ -7803,7 +7827,7 @@ static int MrMainReal(int argc, char **argv)
 	skin_player_shutdown();
 #endif
 	SyncFromGadgets(&app);
-	SaveSettings(&app);
+	SaveSettingsNow(&app);
 	mint_interface_flush();
 	RADIO_DBG(printf("app-close: SaveSettings done\n");)
 	DrainGuiPorts(&app, "before dispose");
