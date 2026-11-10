@@ -928,3 +928,4 @@ experimental.
    `AMIGA_FAST_POLYPHASE` should remove the polyphase dependency on `MADD64` and
    `SAR64`; any remaining helper symbols should be attributed to non-polyphase
    paths before investigating them one at a time.
+68060 AAC scheduling and validation: [AAC-LC optimisation notes](docs/aac-68060-speed.md).

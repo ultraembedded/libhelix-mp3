@@ -39,3 +39,8 @@ fdct32_lowbands*.out
 mp3_decode_hash_test
 mp3_decode_hash_test60
 mp3_decode_hash*.out
+
+decoders/.aac-build-config
+decoders/.aac-build-config.tmp
+
+/aac_mulshift60_ref_test

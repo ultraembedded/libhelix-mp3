@@ -190,6 +190,27 @@ AAC_CFLAGS += -include aac_m68k_aac_optimized.h \
 	-DAMIGA_M68K_ASM_AAC_TNS
 endif
 
+# Measured per-stage scheduling: the five-register 060 helper improves the
+# transforms/windowing and TNS, but increases FFT register spills. Keep the
+# established helper in FFT, PNS, dequant and stereo. CPU 030/040 unchanged.
+AAC060_REG5 ?= 1
+ifeq ($(CPU),60)
+ifneq ($(filter 1 yes true on,$(AACASM)),)
+ifneq ($(filter 1 yes true on,$(AAC060_REG5)),)
+aac/dct4.o aac/imdct.o aac/tns.o: private AAC_060_STAGE_FLAGS := -DMINTAMP_AAC_060_REG5
+endif
+endif
+endif
+
+# A/B switches must actually rebuild the decoder, rather than reuse objects
+# from the previous CPU/AACASM/REG5 configuration.
+.PHONY: force-aac-config
+.aac-build-config: force-aac-config
+	@printf '%s\n' '$(AAC_CFLAGS)' 'AAC060_REG5=$(AAC060_REG5)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+	@rm -f $@.tmp
+$(AAC_OBJS): .aac-build-config Makefile
+
 aac_entry.o aac_alloc.o aac_module.o: decoder_module.h
 aac_alloc.o aac_module.o: aac_alloc.h
 aac_module.o: aac/aacdec.h
@@ -203,7 +224,7 @@ aac_entry.o aac_alloc.o aac_module.o: %.o: %.c
 # malloc/calloc/realloc/free/exit are redirected and Arduino headers are
 # resolved through aac-arduino-shim/.
 aac/%.o: aac/%.c
-	$(CC) $(AAC_CFLAGS) \
+	$(CC) $(AAC_CFLAGS) $(AAC_060_STAGE_FLAGS) \
 	    -include aac_standalone.h \
 	    -Dmalloc=AacModuleMalloc \
 	    -Dcalloc=AacModuleCalloc \

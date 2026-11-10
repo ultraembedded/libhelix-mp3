@@ -1,7 +1,9 @@
 #include <limits.h>
 #include <stdio.h>
 
+#ifndef MINTAMP_AAC_NATIVE_68060
 #define MINTAMP_AAC_TEST_68060 1
+#endif
 #include "../decoders/aac_m68k_aac_optimized.h"
 
 static unsigned int rng_state = 0x4d696e74U;
@@ -23,7 +25,9 @@ static int check_pair(int x, int y)
     unsigned long long madd_actual = (unsigned long long)
                                     AAC_M68K_MADD64((long long)base, x, y);
 
-    if (actual != expected || madd_actual != madd_expected) {
+    unsigned long long scaled_expected = base + (unsigned long long)((long long)x * (1 << 20));
+    unsigned long long scaled_actual = (unsigned long long)AAC_M68K_MADD64((long long)base, x, 1 << 20);
+    if (actual != expected || madd_actual != madd_expected || scaled_actual != scaled_expected) {
         fprintf(stderr,
                 "FAIL x=%d y=%d high=%d expected=%d madd=%llu expected=%llu\n",
                 x, y, actual, expected, madd_actual, madd_expected);

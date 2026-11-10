@@ -34,6 +34,13 @@ jobs:
       - name: Check the 68060 AAC multiply arithmetic
         run: make -f Makefile.amiga aac-mulshift60-ref-test
 
+      - name: Check native 68060 AAC assembly and full-decoder PCM
+        if: matrix.cpu == '60'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-m68k-linux-gnu libc6-dev-m68k-cross binutils-m68k-linux-gnu qemu-user
+          make -f Makefile.amiga aac-060-m68k-test
+
       - name: Check the 68060 Ogg multiply arithmetic
         run: make -f Makefile.amiga ogg-mulshift60-ref-test
 

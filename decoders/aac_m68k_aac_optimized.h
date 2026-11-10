@@ -62,6 +62,45 @@ static __inline int AAC_M68K_MULS32_LO(int x, int y)
    four single-result products are sufficient to recover the exact high word. */
 static __inline int AAC_M68K_MULSHIFT32(int x, int y)
 {
+#if defined(MINTAMP_AAC_060_REG5) && !defined(MINTAMP_AAC_TEST_68060)
+    unsigned int xl, yl, carry;
+    /* Same signed mulhs decomposition as the reference below, scheduled in
+       five data registers. SWAP/EXT extracts signed high halves without
+       keeping a register containing 16 live across every multiply. All four
+       multiplies have a single 32-bit destination: none traps on a 68060.
+       Early-clobber is required: the inputs are consumed before the sequence
+       finishes, including when the caller passes the same value twice. */
+    __asm__ (
+        "moveq #0,%2\n\t"
+        "move.w %0,%2\n\t"       /* xl = unsigned low(x) */
+        "moveq #0,%3\n\t"
+        "move.w %1,%3\n\t"       /* yl = unsigned low(y) */
+        "swap %0\n\t"
+        "ext.l %0\n\t"           /* x = signed high(x) */
+        "swap %1\n\t"
+        "ext.l %1\n\t"           /* y = signed high(y) */
+        "move.l %2,%4\n\t"
+        "mulu.l %3,%4\n\t"       /* low product */
+        "clr.w %4\n\t"
+        "swap %4\n\t"            /* high16(low product) */
+        "muls.l %0,%3\n\t"
+        "add.l %4,%3\n\t"        /* t = xhi*ylo + carry */
+        "move.l %3,%4\n\t"
+        "swap %4\n\t"
+        "ext.l %4\n\t"           /* signed high16(t) */
+        "and.l #65535,%3\n\t"
+        "muls.l %1,%2\n\t"
+        "add.l %2,%3\n\t"        /* w1 = xlo*yhi + low16(t) */
+        "swap %3\n\t"
+        "ext.l %3\n\t"
+        "muls.l %1,%0\n\t"
+        "add.l %4,%0\n\t"
+        "add.l %3,%0"
+        : "+&d" (x), "+&d" (y), "=&d" (xl), "=&d" (yl), "=&d" (carry)
+        :
+        : "cc");
+    return x;
+#else
     unsigned int x0 = (unsigned int)x & 0xffffU;
     int x1 = x >> 16;
     unsigned int y0 = (unsigned int)y & 0xffffU;
@@ -73,10 +112,17 @@ static __inline int AAC_M68K_MULSHIFT32(int x, int y)
 
     w1 = AAC_M68K_MULS32_LO((int)x0, y1) + w1;
     return AAC_M68K_MULS32_LO(x1, y1) + w2 + (w1 >> 16);
+#endif
 }
 
 static __inline long long AAC_M68K_MADD64(long long sum, int x, int y)
 {
+    /* TNS starts its accumulator with y[n] * 2^20. A known power of two
+       needs no partial products; use unsigned shifting to define negative
+       inputs and wrapping accumulation exactly like the general path. */
+    if (__builtin_constant_p(y) && y > 0 && ((unsigned int)y & ((unsigned int)y - 1U)) == 0)
+        return (long long)((unsigned long long)sum +
+               ((unsigned long long)(long long)x << __builtin_ctz((unsigned int)y)));
     unsigned int lo;
     unsigned int hi;
     unsigned long long product;

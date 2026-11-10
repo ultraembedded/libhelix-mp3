@@ -30,6 +30,7 @@ CPU ?= 30
 # Decoder-module AAC helpers are on by default; pass AACASM=0 for the portable
 # C A/B build. Forwarded explicitly by decoder-modules below.
 AACASM ?= 1
+AAC060_REG5 ?= 1
 # Rockbox WMA fixed-point helpers follow the same opt-out convention.
 WMAASM ?= 1
 # libfoxenflac LPC restoration helpers; FLACASM=0 keeps portable C.
@@ -679,6 +680,7 @@ decoder-modules:
 		CC="$(CC)" \
 		CPU="$(CPU)" \
 		AACASM="$(AACASM)" \
+		AAC060_REG5="$(AAC060_REG5)" \
 		WMAASM="$(WMAASM)" \
 		FLACASM="$(FLACASM)"
 
@@ -798,3 +800,8 @@ skin-sprite-test:
 interface-prefs-test:
 	$(HOSTCC) -O2 -std=gnu89 -Wall -Wextra -Werror -DMINTAMP_PREFS_TEST -I. tests/interface_prefs_test.c interface_prefs.c launch_options.c -o interface_prefs_test
 	./interface_prefs_test
+
+# Runs the actual 060 inline assembly plus full-decoder PCM comparisons.
+aac-060-m68k-test:
+	sh tests/run_aac_060_check.sh
+.PHONY: aac-060-m68k-test
